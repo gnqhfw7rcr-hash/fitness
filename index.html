@@ -266,7 +266,7 @@ function DateNav({date,setDate}){
       {!isToday&&<div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44"}}>{fmtDate(date)}</div>}
     </div>
     <button onClick={()=>setDate(d=>addDays(d,1))} disabled={isToday} style={{background:isToday?"#ffffff05":"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:isToday?"#ffffff22":"#fff",fontSize:18,cursor:isToday?"default":"pointer"}}>›</button>
-    {!isToday&&<button onClick={()=>setDate(todayDE())} style={{background:`${theme.primary}22`,border:`1px solid ${theme.primary}44`,borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
+    {!isToday&&<button onClick={()=>setDate(todayDE())} style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
   </div>);
 }
 
@@ -443,7 +443,7 @@ function ProfileModal({profiles,activeId,onSwitch,onSave,onDelete,onClose}){
         const g=calcGoals(p),isActive=p.id===activeId;
         return(<div key={p.id} style={{background:isActive?"#ff6b9d18":"#16213e",border:`1px solid ${isActive?"#ff6b9d55":"#ffffff0a"}`,borderRadius:14,padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:12}}>
           <div onClick={()=>{onSwitch(p.id);onClose();}} style={{flex:1,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:38,height:38,borderRadius:"50%",background:isActive?"linear-gradient(135deg,#ff6b9d,#a78bfa)":"#ffffff15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,color:"#fff",flexShrink:0}}>{p.gender==="male"?"♂":"♀"}</div>
+            <div style={{width:38,height:38,borderRadius:"50%",background:isActive?`linear-gradient(135deg,${(THEMES[p.theme||"pink"]||THEMES.pink).primary},${(THEMES[p.theme||"pink"]||THEMES.pink).secondary})`:"#ffffff15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{p.icon||"⭐"}</div>
             <div>
               <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{p.name} {isActive&&<span style={{color:"#ff6b9d",fontSize:11}}>✓ aktiv</span>}</div>
               <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>{p.weight}kg · {p.age}J · {g.kcal} kcal{p.hasScoliosis?" · 🏥":""}</div>
@@ -493,7 +493,7 @@ function NutritionTab({allMeals,setAllMeals,allSessions,allSteps,setAllSteps,dat
       const burnKcal=isCardioSport?Math.round(kpm*(s.durationMin||10)):(({
         "Glute Day":220,"Back Day":200
       })[s.type]||180);
-      const ic=s.sessionKind==="cardio"?"🐣":s.sessionKind==="sport"?"🏆":s.type==="Glute Day"?"🍍":s.type==="Back Day"?"💪":"🏋";
+      const ic=s.sessionKind==="cardio"?"🐣":s.sessionKind==="sport"?"🏆":s.type==="Glute Day"?"🍑":s.type==="Back Day"?"💪":"🏋";
       return(<div key={s.id} style={{background:"#16213e",borderRadius:12,padding:"10px 14px",marginBottom:8,border:"1px solid #f59e0b33",display:"flex",alignItems:"center",gap:10}}>
         <span style={{fontSize:16}} dangerouslySetInnerHTML={{__html:ic}}/>
         <div style={{flex:1}}>
@@ -637,7 +637,7 @@ function TrainingTab({allSessions,setAllSessions,allSteps,setAllSteps,userTempla
   function sessionIcon(s){
     if(s.sessionKind==="cardio"){const c=CARDIO_LIST.find(x=>x.name===s.type);return c?c.icon:"🐣";}
     if(s.sessionKind==="sport"){const sp=SPORT_LIST.find(x=>x.name===s.type);return sp?sp.icon:"🏆";}
-    return {["Glute Day"]:"🍍",["Back Day"]:"💪"}[s.type]||"🏋";
+    return {["Glute Day"]:"🍑",["Back Day"]:"💪"}[s.type]||"🏋";
   }
 
   return(<div style={{paddingBottom:24}}>
@@ -650,7 +650,7 @@ function TrainingTab({allSessions,setAllSessions,allSteps,setAllSteps,userTempla
 
     {/* Basis-Trainings */}
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
-      {[{label:"Glute Day",ic:"🍍",border:"#ff6b9d33",action:()=>openTrainingTemplate("Glute Day")},
+      {[{label:"Glute Day",ic:"🍑",border:"#ff6b9d33",action:()=>openTrainingTemplate("Glute Day")},
         {label:"Back Day",ic:"💪",border:"#ff6b9d33",action:()=>openTrainingTemplate("Back Day")}
       ].map(({label,ic,border,action})=>(<button key={label} onClick={action} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:`1px solid ${border}`,borderRadius:15,padding:"15px 8px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
         <div style={{fontSize:24,marginBottom:3}} dangerouslySetInnerHTML={{__html:ic}}/>
@@ -873,7 +873,7 @@ function App(){
         :<TrainingTab allSessions={profileSessions} setAllSessions={setProfileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} userTemplates={profileTemplates} setUserTemplates={setProfileTemplates} profile={activeProfile} allProfileSessions={profileSessions} date={currentDate} setDate={setDate}/>}
     </div>
     <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:theme.card+"fa",backdropFilter:"blur(20px)",borderTop:"1px solid #ffffff0e",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {[{id:"nutrition",label:"Ernährung",icon:"🏥"},{id:"training",label:"Training",icon:"🏋"}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",padding:"13px 0 15px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+      {[{id:"nutrition",label:"Ernährung",icon:"🥗"},{id:"training",label:"Training",icon:"🏋️"}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",padding:"13px 0 15px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
         <span style={{fontSize:21,filter:tab===t.id?"none":"grayscale(1) opacity(0.35)"}} dangerouslySetInnerHTML={{__html:t.icon}}/>
         <span style={{fontFamily:"DM Sans",fontSize:10,fontWeight:600,color:tab===t.id?(theme?.primary||"#ff6b9d"):"#ffffff33"}}>{t.label}</span>
         {tab===t.id&&<div style={{width:22,height:2,background:"#ff6b9d",borderRadius:99,boxShadow:`0 0 7px ${theme.primary}`}}/>}
