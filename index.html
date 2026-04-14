@@ -87,7 +87,22 @@ const DEFAULT_TEMPLATES = {
 };
 
 const MEAL_TYPE_OPTIONS = ["Frühstück","Mittagessen","Abendessen","Snack"];
-const DEFAULT_PROFILE = {id:"toni",name:"Toni",weight:59,height:168,age:20,activity:"medium",gender:"female",hasScoliosis:true,goal:"glute"};
+const PROFILE_ICONS = [
+  "🌸","⚡","🔥","💎","🦋","🌙","⭐","🎯","🏆","💪",
+  "🍀","🌺","🦄","🎀","🌊","❄️","🌻","🦊","🐺","🎸"
+];
+
+const THEMES = {
+  pink:   {name:"Pink",    primary:"#ff6b9d", secondary:"#a78bfa", accent:"#34d399", bg:"#0f0f23", card:"#16213e"},
+  purple: {name:"Lila",    primary:"#a78bfa", secondary:"#f59e0b", accent:"#34d399", bg:"#0d0d1f", card:"#141428"},
+  teal:   {name:"Türkis",  primary:"#2dd4bf", secondary:"#a78bfa", accent:"#f59e0b", bg:"#0a1628", card:"#0f1f30"},
+  orange: {name:"Orange",  primary:"#f97316", secondary:"#a78bfa", accent:"#34d399", bg:"#120a00", card:"#1e1000"},
+  green:  {name:"Grün",    primary:"#34d399", secondary:"#60a5fa", accent:"#f59e0b", bg:"#051a10", card:"#0a2218"},
+};
+
+function getTheme(profile){ return THEMES[profile?.theme||"pink"] || THEMES.pink; }
+
+const DEFAULT_PROFILE = {id:"toni",name:"Toni",weight:59,height:168,age:20,activity:"medium",gender:"female",hasScoliosis:true,goal:"glute",icon:"🌸",theme:"pink"};
 
 // ── Trainer Tipps (profilabhängig) ────────────────────────────────────────────
 function getTrainerTips(profile, sessions) {
@@ -199,17 +214,26 @@ function fs(extra={}){return{background:"#0f0f23",border:"1px solid #ffffff18",b
 
 // ── MacroRing ─────────────────────────────────────────────────────────────────
 function MacroRing({label,value,goal,color}){
-  const pct=Math.min(value/goal,1),r=30,cx=38,cy=38,circ=2*Math.PI*r;
+  const raw=value/goal;
+  const over=raw>1;
+  const pct=Math.min(raw,1);
+  const overPct=over?Math.min(raw-1,1):0;
+  const r=30,cx=38,cy=38,circ=2*Math.PI*r;
+  // darken color for overflow
+  const overColor=color==="#ff6b9d"?"#a0003d":color==="#a78bfa"?"#5b21b6":"#059669";
   return(<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
     <svg width="76" height="76" viewBox="0 0 76 76">
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="#ffffff10" strokeWidth="6"/>
       <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="6"
         strokeDasharray={`${pct*circ} ${circ}`} strokeDashoffset={circ*0.25} strokeLinecap="round"
-        style={{transition:"stroke-dasharray 0.7s ease",filter:`drop-shadow(0 0 5px ${color}99)`}}/>
-      <text x={cx} y={cy-4} textAnchor="middle" fill="#fff" fontSize="11" fontWeight="600" fontFamily="DM Sans">{r1(value)}</text>
+        style={{transition:"stroke-dasharray 0.7s ease",filter:`drop-shadow(0 0 5px ${color}88)`}}/>
+      {over&&<circle cx={cx} cy={cy} r={r} fill="none" stroke={overColor} strokeWidth="6"
+        strokeDasharray={`${overPct*circ} ${circ}`} strokeDashoffset={circ*0.25} strokeLinecap="round"
+        style={{transition:"stroke-dasharray 0.7s ease",filter:`drop-shadow(0 0 6px ${overColor}cc)`}}/>}
+      <text x={cx} y={cy-4} textAnchor="middle" fill={over?"#fbbf24":"#fff"} fontSize="11" fontWeight="600" fontFamily="DM Sans">{r1(value)}</text>
       <text x={cx} y={cy+9} textAnchor="middle" fill="#ffffff55" fontSize="8" fontFamily="DM Sans">/{goal}g</text>
     </svg>
-    <span style={{fontSize:10,color:"#ffffff77",fontFamily:"DM Sans"}}>{label}</span>
+    <span style={{fontSize:10,color:over?"#fbbf24":"#ffffff77",fontFamily:"DM Sans"}}>{label}{over?" ▲":""}</span>
   </div>);
 }
 function KcalBar({value,goal,hasTraining}){
@@ -237,7 +261,7 @@ function DateNav({date,setDate}){
       {!isToday&&<div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44"}}>{fmtDate(date)}</div>}
     </div>
     <button onClick={()=>setDate(d=>addDays(d,1))} disabled={isToday} style={{background:isToday?"#ffffff05":"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:isToday?"#ffffff22":"#fff",fontSize:18,cursor:isToday?"default":"pointer"}}>&#8250;</button>
-    {!isToday&&<button onClick={()=>setDate(todayDE())} style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
+    {!isToday&&<button onClick={()=>setDate(todayDE())} style={{background:`${theme.primary}22`,border:`1px solid ${theme.primary}44`,borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
   </div>);
 }
 
@@ -318,15 +342,15 @@ function AddMealModal({onAdd,onClose}){
 function ProfileModal({profiles,activeId,onSwitch,onSave,onDelete,onClose}){
   const [view,setView]=useState("list");
   const [editing,setEditing]=useState(null);
-  const [form,setForm]=useState({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female",hasScoliosis:false,goal:"muscle"});
+  const [form,setForm]=useState({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female",hasScoliosis:false,goal:"muscle",icon:"⭐",theme:"pink"});
   const actLabels={low:"Wenig aktiv",medium:"Moderat",high:"Sehr aktiv"};
   const goalLabels={glute:"Gluteaufbau",upper:"Oberkörper",muscle:"Allg. Muskelaufbau",fat:"Fettabbau"};
 
-  function startEdit(p){setEditing(p.id);setForm({name:p.name,weight:p.weight,height:p.height,age:p.age,activity:p.activity||"medium",gender:p.gender||"female",hasScoliosis:!!p.hasScoliosis,goal:p.goal||"muscle"});setView("edit");}
-  function startNew(){setEditing(null);setForm({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female",hasScoliosis:false,goal:"muscle"});setView("new");}
+  function startEdit(p){setEditing(p.id);setForm({name:p.name,weight:p.weight,height:p.height,age:p.age,activity:p.activity||"medium",gender:p.gender||"female",hasScoliosis:!!p.hasScoliosis,goal:p.goal||"muscle",icon:p.icon||"⭐",theme:p.theme||"pink"});setView("edit");}
+  function startNew(){setEditing(null);setForm({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female",hasScoliosis:false,goal:"muscle",icon:"⭐",theme:"pink"});setView("new");}
   function save(){
     if(!form.name.trim())return;
-    onSave({id:editing||String(Date.now()),name:form.name,weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity,gender:form.gender,hasScoliosis:form.hasScoliosis,goal:form.goal});
+    onSave({id:editing||String(Date.now()),name:form.name,weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity,gender:form.gender,hasScoliosis:form.hasScoliosis,goal:form.goal,icon:form.icon,theme:form.theme});
     setView("list");
   }
 
@@ -365,6 +389,23 @@ function ProfileModal({profiles,activeId,onSwitch,onSave,onDelete,onClose}){
           <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Trainingsziel</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             {Object.entries(goalLabels).map(([val,label])=>(<button key={val} onClick={()=>setForm(p=>({...p,goal:val}))} style={{background:form.goal===val?"#a78bfa":"#ffffff0f",border:"none",borderRadius:10,padding:"10px 4px",color:form.goal===val?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{label}</button>))}
+          </div>
+        </div>
+        {/* Icon wählen */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Profilbild</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {PROFILE_ICONS.map(ic=>(<button key={ic} onClick={()=>setForm(p=>({...p,icon:ic}))} style={{width:42,height:42,borderRadius:12,background:form.icon===ic?"linear-gradient(135deg,#ff6b9d,#a78bfa)":"#ffffff0f",border:form.icon===ic?"2px solid #ff6b9d":"2px solid transparent",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{ic}</button>))}
+          </div>
+        </div>
+        {/* Farbthema */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Farbthema</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {Object.entries(THEMES).map(([key,t])=>(<button key={key} onClick={()=>setForm(p=>({...p,theme:key}))} style={{flex:1,minWidth:60,background:form.theme===key?t.primary+"33":"#ffffff0f",border:`2px solid ${form.theme===key?t.primary:"transparent"}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+              <div style={{width:20,height:20,borderRadius:"50%",background:t.primary,boxShadow:`0 0 8px ${t.primary}88`}}/>
+              <span style={{fontFamily:"DM Sans",fontSize:10,color:form.theme===key?"#fff":"#ffffff55"}}>{t.name}</span>
+            </button>))}
           </div>
         </div>
         {/* Skoliose */}
@@ -413,7 +454,7 @@ function ProfileModal({profiles,activeId,onSwitch,onSave,onDelete,onClose}){
 }
 
 // ── Ernährung Tab ─────────────────────────────────────────────────────────────
-function NutritionTab({allMeals,setAllMeals,allSessions,allSteps,setAllSteps,date,setDate,baseGoals,profile}){
+function NutritionTab({allMeals,setAllMeals,allSessions,allSteps,setAllSteps,date,setDate,baseGoals,profile,theme}){
   const [showModal,setShowModal]=useState(false);
   const [filter,setFilter]=useState("Alle");
   const meals=allMeals[date]||[];
@@ -433,9 +474,9 @@ function NutritionTab({allMeals,setAllMeals,allSessions,allSteps,setAllSteps,dat
       <KcalBar value={totals.kcal} goal={goals.kcal} hasTraining={hasTraining}/>
       {hasTraining&&<div style={{fontFamily:"DM Sans",fontSize:11,color:"#f59e0b",marginBottom:10,textAlign:"center"}}>&#127947; +{goals.kcal-baseGoals.kcal} kcal durch Training</div>}
       <div style={{display:"flex",justifyContent:"space-around",marginTop:14}}>
-        <MacroRing label="Protein" value={totals.protein} goal={goals.protein} color="#ff6b9d"/>
-        <MacroRing label="Kohlenhydrate" value={totals.carbs} goal={goals.carbs} color="#a78bfa"/>
-        <MacroRing label="Fett" value={totals.fat} goal={goals.fat} color="#34d399"/>
+        <MacroRing label="Protein" value={totals.protein} goal={goals.protein} color={theme?.primary||"#ff6b9d"}/>
+        <MacroRing label="Kohlenhydrate" value={totals.carbs} goal={goals.carbs} color={theme?.secondary||"#a78bfa"}/>
+        <MacroRing label="Fett" value={totals.fat} goal={goals.fat} color={theme?.accent||"#34d399"}/>
       </div>
     </div>
     <DayAnalysisCard totals={totals} goals={goals} sessions={sessions} steps={steps} profile={profile}/>
@@ -458,7 +499,7 @@ function NutritionTab({allMeals,setAllMeals,allSessions,allSteps,setAllSteps,dat
       <span style={{fontSize:18}}>&#9888;</span>
       <div><div style={{fontFamily:"DM Sans",fontWeight:600,color:"#ff6b9d",fontSize:13}}>Protein-Ziel weit entfernt</div><div style={{fontFamily:"DM Sans",color:"#ffffff77",fontSize:12,marginTop:1}}>Nur {Math.round(totals.protein/goals.protein*100)}% – mehr Protein für deinen Muskelaufbau!</div></div>
     </div>)}
-    <button onClick={()=>setShowModal(true)} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 18px #ff6b9d44",marginBottom:14}}>+ Mahlzeit eintragen</button>
+    <button onClick={()=>setShowModal(true)} style={{width:"100%",background:`linear-gradient(135deg,${theme?.primary||"#ff6b9d"},${theme?.primary||"#ff6b9d"}cc)`,border:"none",borderRadius:14,padding:"13px",color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 18px #ff6b9d44",marginBottom:14}}>+ Mahlzeit eintragen</button>
     {meals.length>0&&(<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:12}}>
       {["Alle",...MEAL_TYPE_OPTIONS].map(t=>(<button key={t} onClick={()=>setFilter(t)} style={{background:filter===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:99,padding:"5px 13px",color:filter===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{t}</button>))}
     </div>)}
@@ -777,12 +818,22 @@ function App(){
   const setDate=useCallback(fn=>setCurrentDate(prev=>typeof fn==="function"?fn(prev):fn),[]);
 
   useEffect(()=>{
-    const check=setInterval(()=>{const de=todayDE();setCurrentDate(prev=>prev===de?prev:de);},60000);
+    // Only auto-advance if user is currently viewing today (midnight rollover)
+    const check=setInterval(()=>{
+      setCurrentDate(prev=>{
+        const td=todayDE();
+        // Only update if they're on today's date and it just rolled over
+        if(prev===td) return prev;
+        // Don't touch past dates the user intentionally navigated to
+        return prev;
+      });
+    },60000);
     return()=>clearInterval(check);
   },[]);
 
-  return(<div style={{minHeight:"100vh",background:"#0f0f23",fontFamily:"DM Sans,sans-serif",maxWidth:480,margin:"0 auto",paddingBottom:"max(80px,calc(80px + env(safe-area-inset-bottom)))"}}>
-    <div style={{background:"linear-gradient(180deg,#16213e,#0f0f23)",padding:"max(22px,calc(14px + env(safe-area-inset-top))) 18px 14px",borderBottom:"1px solid #ffffff08"}}>
+  const theme=getTheme(activeProfile);
+  return(<div style={{minHeight:"100vh",background:theme.bg,fontFamily:"DM Sans,sans-serif",maxWidth:480,margin:"0 auto",paddingBottom:"max(80px,calc(80px + env(safe-area-inset-bottom)))",["--p"]:theme.primary,["--s"]:theme.secondary,["--a"]:theme.accent,["--c"]:theme.card}}>
+    <div style={{background:`linear-gradient(180deg,${theme.card},${theme.bg})`,padding:"max(22px,calc(14px + env(safe-area-inset-top))) 18px 14px",borderBottom:"1px solid #ffffff08"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
           <div style={{fontFamily:"Playfair Display",fontSize:24,fontWeight:700,color:"#fff",lineHeight:1.1}}>Hey, {activeProfile.name}! &#10024;</div>
@@ -790,25 +841,25 @@ function App(){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:12,padding:"7px 13px",textAlign:"center"}}>
-            <div style={{fontFamily:"Playfair Display",fontSize:17,fontWeight:700,color:"#ff6b9d"}}>{todayKcal}</div>
+            <div style={{fontFamily:"Playfair Display",fontSize:17,fontWeight:700,color:theme.primary}}>{todayKcal}</div>
             <div style={{fontFamily:"DM Sans",fontSize:9,color:"#ffffff44"}}>kcal heute</div>
           </div>
-          <button onClick={()=>setShowProfile(true)} style={{width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#ff6b9d,#a78bfa)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,color:"#fff",flexShrink:0}}>
-            <span dangerouslySetInnerHTML={{__html:activeProfile.gender==="male"?"&#9794;":"&#9792;"}}/>
+          <button onClick={()=>setShowProfile(true)} style={{width:40,height:40,borderRadius:"50%",background:`linear-gradient(135deg,${getTheme(activeProfile).primary},${getTheme(activeProfile).secondary})`,border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
+            {activeProfile.icon||"⭐"}
           </button>
         </div>
       </div>
     </div>
     <div style={{padding:"16px 14px 0"}}>
       {tab==="nutrition"
-        ?<NutritionTab allMeals={profileMeals} setAllMeals={setProfileMeals} allSessions={profileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate} baseGoals={baseGoals} profile={activeProfile}/>
+        ?<NutritionTab allMeals={profileMeals} setAllMeals={setProfileMeals} allSessions={profileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate} baseGoals={baseGoals} profile={activeProfile} theme={theme}/>
         :<TrainingTab allSessions={profileSessions} setAllSessions={setProfileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} userTemplates={profileTemplates} setUserTemplates={setProfileTemplates} profile={activeProfile} allProfileSessions={profileSessions} date={currentDate} setDate={setDate}/>}
     </div>
-    <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(20,28,56,0.97)",backdropFilter:"blur(20px)",borderTop:"1px solid #ffffff0e",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom)"}}>
+    <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:`rgba(${parseInt(theme.card.slice(1,3),16)},${parseInt(theme.card.slice(3,5),16)},${parseInt(theme.card.slice(5,7),16)},0.97)`,backdropFilter:"blur(20px)",borderTop:"1px solid #ffffff0e",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom)"}}>
       {[{id:"nutrition",label:"Ernährung",icon:"&#127973;"},{id:"training",label:"Training",icon:"&#127947;"}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",padding:"13px 0 15px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
         <span style={{fontSize:21,filter:tab===t.id?"none":"grayscale(1) opacity(0.35)"}} dangerouslySetInnerHTML={{__html:t.icon}}/>
-        <span style={{fontFamily:"DM Sans",fontSize:10,fontWeight:600,color:tab===t.id?"#ff6b9d":"#ffffff33"}}>{t.label}</span>
-        {tab===t.id&&<div style={{width:22,height:2,background:"#ff6b9d",borderRadius:99,boxShadow:"0 0 7px #ff6b9d"}}/>}
+        <span style={{fontFamily:"DM Sans",fontSize:10,fontWeight:600,color:tab===t.id?theme.primary:"#ffffff33"}}>{t.label}</span>
+        {tab===t.id&&<div style={{width:22,height:2,background:theme.primary,borderRadius:99,boxShadow:`0 0 7px ${theme.primary}`}}/>}
       </button>))}
     </div>
     {showProfile&&<ProfileModal profiles={profiles} activeId={activeProfileId} onSwitch={id=>{setActiveProfileId(id);setShowProfile(false);}} onSave={saveProfile} onDelete={deleteProfile} onClose={()=>setShowProfile(false)}/>}
