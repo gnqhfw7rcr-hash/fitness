@@ -534,7 +534,7 @@ function ExerciseRow({ ex, onToggle, onRemove, onChange }) {
 }
 
 // ── TrainingTab ───────────────────────────────────────────────────────────────
-function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, date, setDate }) {
+function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, userTemplates, setUserTemplates, date, setDate }) {
   const steps = allSteps[date]||0;
   function setSteps(v){setAllSteps(prev=>({...prev,[date]:v}));}
   const [modal,setModal]=useState(null);
@@ -544,9 +544,30 @@ function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, date,
   const [stepperMin,setStepperMin]=useState(10);
   const [showAddEx,setShowAddEx]=useState(false);
   const [newEx,setNewEx]=useState({name:"",weightStr:"",sets:"3",reps:"10"});
+  const [confirmDelete,setConfirmDelete]=useState(null); // {type:"template"|"session", id, name}
   const sessions=allSessions[date]||[];
 
-  function openTemplate(type){setExercises(DEFAULT_TEMPLATES[type].map((e,i)=>({...e,id:i})));setNote("");setShowAddEx(false);setModal(type);}
+  // Standard-Trainings
+  const FIXED_TYPES = ["Glute Day","Back Day","Stepper"];
+  // Alle gespeicherten eigenen Trainings (Vorlagen)
+  const customTemplateKeys = Object.keys(userTemplates).filter(k=>!FIXED_TYPES.includes(k));
+
+  // Vorlage holen: gespeicherte Version oder Standard
+  function getTemplate(type){
+    return userTemplates[type] || DEFAULT_TEMPLATES[type] || [];
+  }
+  // Vorlage dauerhaft speichern
+  function saveTemplate(type, exs){
+    if(type==="Stepper") return;
+    setUserTemplates(prev=>({...prev,[type]:exs.map(e=>({...e,done:false}))}));
+  }
+  // Vorlage löschen (mit Rückfrage)
+  function deleteTemplate(type){
+    setUserTemplates(prev=>{const n={...prev};delete n[type];return n;});
+    setConfirmDelete(null);
+  }
+
+  function openTemplate(type){setExercises(getTemplate(type).map((e,i)=>({...e,id:e.id||i,done:false})));setNote("");setShowAddEx(false);setModal(type);}
   function updateEx(id,key,val){setExercises(prev=>prev.map(e=>e.id===id?{...e,[key]:val}:e));}
   function toggleEx(id){setExercises(prev=>prev.map(e=>e.id===id?{...e,done:!e.done}:e));}
   function removeEx(id){setExercises(prev=>prev.filter(e=>e.id!==id));}
@@ -558,6 +579,7 @@ function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, date,
   function saveSession(){
     const tip=TRAINER_TIPS[Math.floor(Math.random()*TRAINER_TIPS.length)];
     const name=modal==="custom"?(customName||"Eigenes Training"):modal;
+    saveTemplate(name, exercises);
     setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:name,exercises:[...exercises],note,tip}]}));
     setModal(null);
   }
@@ -577,17 +599,47 @@ function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, date,
         <span style={{fontSize:16}}>🏥</span>
         <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}><strong style={{color:"#a78bfa"}}>Skoliose & Hohlkreuz:</strong> Form vor Gewicht – neutrales Becken, Kernspannung halten.</div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:18}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:customTemplateKeys.length>0?10:18}}>
         {[
           {label:"Glute Day",ic:"🍑",border:"#ff6b9d33",action:()=>openTemplate("Glute Day")},
           {label:"Back Day",ic:"💪",border:"#ff6b9d33",action:()=>openTemplate("Back Day")},
-          {label:"Eigenes",ic:"➕",border:"#34d39933",action:()=>{setExercises([]);setCustomName("");setNote("");setModal("custom");}},
+          {label:"+ Neues",ic:"➕",border:"#34d39933",action:()=>{setExercises([]);setCustomName("");setNote("");setModal("custom");}},
           {label:"Stepper",ic:"🚶‍♀️",border:"#f59e0b33",action:()=>{setStepperMin(10);setModal("stepper");}},
         ].map(({label,ic,border,action})=>(<button key={label} onClick={action} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:`1px solid ${border}`,borderRadius:15,padding:"15px 8px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
           <div style={{fontSize:24,marginBottom:3}}>{ic}</div>
           <div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700}}>{label}</div>
         </button>))}
       </div>
+      {/* Eigene gespeicherte Trainings */}
+      {customTemplateKeys.length>0&&(<div style={{marginBottom:18}}>
+        <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44",marginBottom:8,letterSpacing:"0.04em"}}>MEINE TRAININGS</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {customTemplateKeys.map(key=>(<div key={key} style={{display:"flex",alignItems:"center",gap:8}}>
+            <button onClick={()=>openTemplate(key)} style={{flex:1,background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:"1px solid #a78bfa33",borderRadius:12,padding:"12px 14px",color:"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:20}}>🏋️</span>
+              <div>
+                <div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700,color:"#fff"}}>{key}</div>
+                <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>{(userTemplates[key]||[]).length} Übungen</div>
+              </div>
+            </button>
+            <button onClick={()=>setConfirmDelete({type:"template",name:key})} style={{background:"#ff6b9d15",border:"1px solid #ff6b9d33",borderRadius:10,width:38,height:38,color:"#ff6b9d",fontSize:16,cursor:"pointer",flexShrink:0}}>🗑</button>
+          </div>))}
+        </div>
+      </div>)}
+
+      {/* Rückfrage Löschen */}
+      {confirmDelete&&(<div style={{position:"fixed",inset:0,background:"#000c",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
+        <div style={{background:"#1a1a2e",borderRadius:20,padding:24,width:"100%",maxWidth:400,border:"1px solid #ff6b9d44"}}>
+          <div style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff",marginBottom:10,textAlign:"center"}}>Training löschen?</div>
+          <div style={{fontFamily:"DM Sans",fontSize:14,color:"#ffffff88",textAlign:"center",marginBottom:20}}>
+            Willst du <strong style={{color:"#ff6b9d"}}>"{confirmDelete.name}"</strong> wirklich dauerhaft löschen? Das kann nicht rückgängig gemacht werden.
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>setConfirmDelete(null)} style={{flex:1,background:"#ffffff15",border:"none",borderRadius:12,padding:14,color:"#fff",fontFamily:"DM Sans",fontWeight:600,fontSize:14,cursor:"pointer"}}>Abbrechen</button>
+            <button onClick={()=>deleteTemplate(confirmDelete.name)} style={{flex:1,background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:12,padding:14,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 14px #ff6b9d44"}}>Ja, löschen</button>
+          </div>
+        </div>
+      </div>)}
 
       {modal==="stepper"&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
         <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
@@ -610,7 +662,7 @@ function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, date,
         </div>
       </div>)}
 
-      {(modal==="Glute Day"||modal==="Back Day"||modal==="custom")&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      {(modal==="Glute Day"||modal==="Back Day"||modal==="custom"||customTemplateKeys.includes(modal))&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
         <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>{modal==="custom"?"✨ Eigenes Training":modal}</span>
@@ -653,11 +705,14 @@ function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, date,
               {s.stepperMin&&<span style={{fontFamily:"DM Sans",fontSize:12,color:"#f59e0b"}}>{s.stepperMin} min</span>}
             </div>
             <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:11}}>
-              {s.exercises.map(e=>(<span key={e.id} style={{background:e.done?"#ff6b9d22":"#ffffff09",border:`1px solid ${e.done?"#ff6b9d44":"#ffffff09"}`,borderRadius:99,padding:"3px 9px",fontFamily:"DM Sans",fontSize:11,color:e.done?"#ff9ec8":"#ffffff44"}}>
+              {s.exercises.map(e=>(<span key={e.id} onClick={()=>{
+                setAllSessions(prev=>({...prev,[date]:(prev[date]||[]).map(ss=>ss.id===s.id?{...ss,exercises:ss.exercises.map(ex=>ex.id===e.id?{...ex,done:!ex.done}:ex)}:ss)}));
+              }} style={{background:e.done?"#ff6b9d22":"#ffffff09",border:`1px solid ${e.done?"#ff6b9d44":"#ffffff09"}`,borderRadius:99,padding:"3px 9px",fontFamily:"DM Sans",fontSize:11,color:e.done?"#ff9ec8":"#ffffff44",cursor:"pointer"}}>
                 {e.done?"✓ ":""}{e.name}{e.weightStr?` · ${e.weightStr}kg`:""} {e.sets}×{e.reps}
               </span>))}
             </div>
             {s.note&&<div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff55",marginBottom:10,fontStyle:"italic"}}>📝 {s.note}</div>}
+            <div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff33",marginBottom:8}}>Übungen antippen zum Abhaken ✓</div>
             <div style={{background:"#a78bfa15",border:"1px solid #a78bfa33",borderRadius:9,padding:"9px 11px",fontFamily:"DM Sans",fontSize:12,color:"#c4b5fd"}}>{s.tip}</div>
           </div>))}
         </div>
@@ -676,23 +731,31 @@ function App() {
   const [allMeals,setAllMeals]=useLS("fitness_meals_v2",{});
   const [allSessions,setAllSessions]=useLS("fitness_sessions_v2",{});
   const [allSteps,setAllSteps]=useLS("fitness_steps_v1",{});
+  const [userTemplates,setUserTemplates]=useLS("fitness_templates_v1",{});
 
   const activeProfile=profiles.find(p=>p.id===activeProfileId)||profiles[0]||DEFAULT_PROFILE;
   const baseGoals=calcGoals(activeProfile);
   const profileMeals=allMeals[activeProfileId]||{};
   const profileSessions=allSessions[activeProfileId]||{};
   const profileSteps=allSteps[activeProfileId]||{};
+  const profileTemplates=userTemplates[activeProfileId]||{};
 
   function setProfileMeals(fn){setAllMeals(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
   function setProfileSessions(fn){setAllSessions(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
   function setProfileSteps(fn){setAllSteps(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
+  function setProfileTemplates(fn){setUserTemplates(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
 
   function saveProfile(p){setProfiles(prev=>prev.find(x=>x.id===p.id)?prev.map(x=>x.id===p.id?p:x):[...prev,p]);setActiveProfileId(p.id);}
   function deleteProfile(id){setProfiles(prev=>prev.filter(p=>p.id!==id));if(activeProfileId===id)setActiveProfileId(profiles.find(p=>p.id!==id)?.id||"toni");}
 
   const todayMeals=profileMeals[todayDE()]||[];
   const todayKcal=r1(todayMeals.reduce((a,m)=>a+m.kcal,0));
-  const setDate=useCallback(fn=>{setCurrentDate(prev=>typeof fn==="function"?fn(prev):fn);},[]);
+  const setDate=useCallback(fn=>{
+    setCurrentDate(prev=>{
+      const next = typeof fn==="function"?fn(prev):fn;
+      return next;
+    });
+  },[]);
 
   // Datum täglich aktualisieren
   useEffect(()=>{
@@ -728,7 +791,7 @@ function App() {
       <div style={{padding:"16px 14px 0"}}>
         {tab==="nutrition"
           ?<NutritionTab allMeals={profileMeals} setAllMeals={setProfileMeals} allSessions={profileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate} baseGoals={baseGoals}/>
-          :<TrainingTab allSessions={profileSessions} setAllSessions={setProfileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate}/>}
+          :<TrainingTab allSessions={profileSessions} setAllSessions={setProfileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} userTemplates={profileTemplates} setUserTemplates={setProfileTemplates} date={currentDate} setDate={setDate}/>}
       </div>
 
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(20,28,56,0.97)",backdropFilter:"blur(20px)",borderTop:"1px solid #ffffff0e",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom)"}}>
