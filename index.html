@@ -20,58 +20,87 @@
   input[type=number]::-webkit-inner-spin-button{opacity:.3;}
   input::placeholder,textarea::placeholder{color:#ffffff22 !important;}
   @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useCallback, useEffect } = React;
+const { useState, useCallback, useEffect, useMemo } = React;
 
-const BASE_GOALS = { kcal: 1700, protein: 110, carbs: 170, fat: 55 };
+// ── Deutsche Zeit ─────────────────────────────────────────────────────────────
+function todayDE() {
+  return new Date().toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })
+    .split(".").reverse().map((p,i) => i===0?p:(p.length===1?"0"+p:p)).join("-");
+}
+// todayDE() → "2025-04-14" in Berliner Zeit
+function addDays(dateStr, n) {
+  const [y,m,d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y,m-1,d));
+  dt.setUTCDate(dt.getUTCDate()+n);
+  const yy=dt.getUTCFullYear(), mm=String(dt.getUTCMonth()+1).padStart(2,"0"), dd=String(dt.getUTCDate()).padStart(2,"0");
+  return `${yy}-${mm}-${dd}`;
+}
+function fmtDate(dateStr) {
+  const [y,m,d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y,m-1,d)).toLocaleDateString("de-DE",{timeZone:"UTC",weekday:"short",day:"numeric",month:"short"});
+}
+
+// ── Kalorien-Berechnung (Mifflin-St Jeor) ─────────────────────────────────────
+function calcGoals(profile) {
+  const { weight, height, age, activity } = profile;
+  if (!weight || !height || !age) return { kcal: 1700, protein: Math.round((weight||59)*1.8), carbs: 170, fat: 55 };
+  const bmr = (p.gender === "male") ? 10*weight + 6.25*height - 5*age + 5 : 10*weight + 6.25*height - 5*age - 161;
+  const factors = { low:1.375, medium:1.55, high:1.725 };
+  const tdee = Math.round(bmr*(factors[activity]||1.55));
+  const kcal = tdee - 200;
+  const protein = Math.round(weight*1.8);
+  const fat = Math.round(weight*0.9);
+  const carbs = Math.round((kcal - protein*4 - fat*9)/4);
+  return { kcal: Math.max(kcal,1400), protein, carbs: Math.max(carbs,100), fat };
+}
+
 const TRAINING_BURN = {
-  "Glute Day":  { kcal: 220, protein: 10, carbs: 15, fat: 0 },
-  "Back Day":   { kcal: 200, protein: 8,  carbs: 14, fat: 0 },
-  "Stepper":    { kcal: 0,   protein: 0,  carbs: 0,  fat: 0 },
-  "Eigenes Training": { kcal: 180, protein: 8, carbs: 12, fat: 0 },
+  "Glute Day":  { kcal:220, carbs:20 },
+  "Back Day":   { kcal:200, carbs:18 },
+  "Stepper":    { kcal:0,   carbs:0  },
+  "Eigenes Training": { kcal:180, carbs:15 },
 };
 const STEPPER_KCAL_PER_MIN = 5.5;
+const STEPS_KCAL_PER_1000 = 40; // ~40 kcal pro 1000 Schritte
+
 const DEFAULT_TEMPLATES = {
   "Glute Day": [
-    { name: "Hip Thrust",    weightStr: "95",   sets: "3", reps: "8",            done: false },
-    { name: "Kickbacks",     weightStr: "13",   sets: "3", reps: "8\u201310",     done: false },
-    { name: "Step Ups",      weightStr: "17",   sets: "3", reps: "8\u201310",     done: false },
-    { name: "Glute Bridges", weightStr: "",     sets: "3", reps: "bis Versagen",  done: false },
+    { name:"Hip Thrust",    weightStr:"95",   sets:"3", reps:"8",           done:false },
+    { name:"Kickbacks",     weightStr:"13",   sets:"3", reps:"8\u201310",   done:false },
+    { name:"Step Ups",      weightStr:"17",   sets:"3", reps:"8\u201310",   done:false },
+    { name:"Glute Bridges", weightStr:"",     sets:"3", reps:"bis Versagen",done:false },
   ],
   "Back Day": [
-    { name: "Lat Pulldown",  weightStr: "37.5", sets: "3", reps: "10", done: false },
-    { name: "Enges Rudern",  weightStr: "27.5", sets: "3", reps: "10", done: false },
-    { name: "Face Pulls",    weightStr: "",     sets: "3", reps: "15", done: false },
+    { name:"Lat Pulldown",  weightStr:"37.5", sets:"3", reps:"10", done:false },
+    { name:"Enges Rudern",  weightStr:"27.5", sets:"3", reps:"10", done:false },
+    { name:"Face Pulls",    weightStr:"",     sets:"3", reps:"15", done:false },
   ],
 };
+
 const TRAINER_TIPS = [
-  "💪 Spannung im Gesäß vor jeder Wiederholung aufbauen!",
-  "🔥 Hip Thrusts: Becken oben 2 Sek halten. Qualität schlägt Tempo.",
-  "⚡ Skoliose-Check: Neutrales Becken, keine Überstreckung!",
-  "🎯 Kickback: Geist-Muskel-Verbindung aktivieren.",
-  "💡 Nach Back Day: Schultermobilisation nicht vergessen.",
-  "🏋️ Form ist alles – Gewicht ist sekundär.",
-  "🌙 7–9h Schlaf = Muskelaufbau-Zeit.",
-  "🥩 25–35g Protein direkt nach dem Training.",
-  "🍑 Hintern anspannen bevor die Hüfte hochgeht.",
+  "💪 Spannung im Gesäß vor jeder Wiederholung aufbauen – aktivieren, nicht nur bewegen!",
+  "🔥 Hip Thrusts: Becken ganz oben 2 Sekunden halten. Qualität schlägt Tempo.",
+  "⚡ Skoliose-Check: Neutrales Becken, keine Überstreckung im Hohlkreuz!",
+  "🎯 Kickback: Geist-Muskel-Verbindung – stell dir vor, du drückst gegen echten Widerstand.",
+  "💡 Nach Back Day: Schultermobilisation & Brustdehnung nicht vergessen.",
+  "🏋️ Form ist alles – Gewicht ist sekundär. Lieber perfekte Technik.",
+  "🌙 7–9h Schlaf = Muskelaufbau-Zeit. Nicht vernachlässigen!",
+  "🥩 25–35g Protein direkt nach dem Training für optimale Muskelproteinsynthese.",
+  "🍑 Hintern anspannen bevor die Hüfte hochgeht – dann erst drücken.",
   "💧 Mindestens 2–3L Wasser am Trainingstag.",
 ];
+
 const MEAL_TYPE_OPTIONS = ["Frühstück","Mittagessen","Abendessen","Snack"];
+const DEFAULT_PROFILE = { id:"toni", name:"Toni", weight:59, height:168, age:20, activity:"medium", gender:"female" };
 
+// ── Utils ─────────────────────────────────────────────────────────────────────
 const r1 = v => Math.round(Number(v)*10)/10;
-const todayStr = () => new Date().toISOString().slice(0,10);
-const fmtDate = d => new Date(d+"T12:00:00").toLocaleDateString("de-DE",{weekday:"short",day:"numeric",month:"short"});
-
-function addDays(dateStr, n) {
-  const d = new Date(dateStr+"T12:00:00");
-  d.setDate(d.getDate()+n);
-  return d.toISOString().slice(0,10);
-}
 
 function useLS(key, def) {
   const [val, setVal] = useState(() => {
@@ -82,26 +111,79 @@ function useLS(key, def) {
 }
 
 function fs(extra={}) {
-  return {background:"#0f0f23",border:"1px solid #ffffff18",borderRadius:10,padding:"10px 12px",color:"#fff",fontFamily:"DM Sans",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",...extra};
+  return { background:"#0f0f23", border:"1px solid #ffffff18", borderRadius:10, padding:"10px 12px", color:"#fff", fontFamily:"DM Sans", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", ...extra };
 }
 
-function computeGoals(sessions, date) {
-  let extra = {kcal:0,protein:0,carbs:0,fat:0};
+function computeGoals(baseGoals, sessions, date) {
+  let extraKcal=0, extraCarbs=0;
   (sessions[date]||[]).forEach(s => {
-    if(s.type==="Stepper"){
+    if(s.type==="Stepper") {
       const m=Number(s.stepperMin)||10;
-      extra.kcal+=Math.round(STEPPER_KCAL_PER_MIN*m);
-      extra.carbs+=Math.round(m*0.3);
+      extraKcal+=Math.round(STEPPER_KCAL_PER_MIN*m);
+      extraCarbs+=Math.round(m*0.3);
     } else {
       const b=TRAINING_BURN[s.type]||TRAINING_BURN["Eigenes Training"];
-      extra.kcal+=b.kcal; extra.protein+=b.protein; extra.carbs+=b.carbs;
+      extraKcal+=b.kcal; extraCarbs+=b.carbs;
     }
   });
-  return {kcal:BASE_GOALS.kcal+extra.kcal,protein:BASE_GOALS.protein+extra.protein,carbs:BASE_GOALS.carbs+extra.carbs,fat:BASE_GOALS.fat};
+  return { ...baseGoals, kcal:baseGoals.kcal+extraKcal, carbs:baseGoals.carbs+extraCarbs };
 }
 
-function MacroRing({label,value,goal,color}){
-  const pct=Math.min(value/goal,1),r=30,cx=38,cy=38,circ=2*Math.PI*r;
+// ── Tagesanalyse ──────────────────────────────────────────────────────────────
+function analyzDay({ totals, goals, sessions, steps, baseGoals }) {
+  const kcalPct = totals.kcal / goals.kcal;
+  const protPct = totals.protein / goals.protein;
+  const hasTraining = sessions.length > 0;
+  const stepKcal = Math.round((steps/1000)*STEPS_KCAL_PER_1000);
+  const deficit = goals.kcal - totals.kcal - stepKcal;
+  const surplus = -deficit;
+
+  let icon, color, title, text, tip;
+
+  if(totals.kcal === 0 && !hasTraining) {
+    return { icon:"✨", color:"#ffffff44", title:"Noch nichts eingetragen", text:"Trag deine erste Mahlzeit ein – ich analysiere dann deinen Tag für dich.", tip:null };
+  }
+
+  // Szenarien
+  if(deficit > 500) {
+    icon="⚠️"; color="#f59e0b";
+    title="Starkes Kaloriendefizit";
+    text=`Mit ${Math.round(totals.kcal)} kcal bei einem Ziel von ${goals.kcal} kcal bist du noch ${Math.round(deficit)} kcal im Minus. Bei solch einem Defizit riskierst du Muskelabbau statt Fettabbau – besonders wenn du heute trainiert hast. Iss noch etwas Proteinreiches!`;
+    tip="Griechischer Joghurt, Quark oder ein Proteinshake helfen schnell.";
+  } else if(deficit > 200) {
+    icon="🔥"; color="#ff6b9d";
+    title="Leichtes Defizit – ideal für Fettabbau";
+    text=`Du bist ${Math.round(deficit)} kcal unter deinem Ziel – das ist der Sweet Spot für leichten Fettabbau ohne Muskeln zu gefährden.${protPct >= 0.8 ? " Deine Proteinversorgung ist gut – deine Muskeln sind geschützt. 💪" : " Achte aber noch auf ausreichend Protein, um deine Muskeln zu schützen."}`;
+    tip= hasTraining ? "Training + leichtes Defizit = perfekte Kombination heute!" : null;
+  } else if(surplus > 200 && surplus < 500) {
+    icon="💪"; color="#34d399";
+    title="Leichter Überschuss – Muskelaufbau aktiv";
+    text=`Mit ${Math.round(surplus)} kcal über deinem Ziel bist du im Aufbaubereich.${hasTraining ? " Zusammen mit deinem heutigen Training ist das die perfekte Basis für Muskelwachstum! Dein Körper hat alles was er braucht." : " Wenn du heute noch trainierst, nutzt dein Körper diese Energie optimal für den Muskelaufbau."}`;
+    tip= protPct >= 0.9 ? "Proteinzufuhr top – weiter so!" : "Erhöhe noch etwas die Proteinzufuhr für maximalen Muskelaufbau.";
+  } else if(surplus >= 500) {
+    icon="📈"; color="#a78bfa";
+    title="Deutlicher Überschuss";
+    text=`Du bist ${Math.round(surplus)} kcal über deinem Tagesziel. Das fördert zwar den Muskelaufbau, aber ein Teil wird als Fett gespeichert. Da dein Ziel leichter Fettabbau ist, versuche morgen etwas ausgewogener zu essen.`;
+    tip=null;
+  } else {
+    // ausgeglichen
+    icon="⚖️"; color="#ff6b9d";
+    title="Ausgeglichen – Körpererhalt";
+    text=`Du bist nah an deinem Kalorienziel.${hasTraining ? " Mit deinem Training heute baut dein Körper aktiv Muskeln auf – sehr gut!" : " Falls du noch trainierst, unterstützt das deinen Muskelaufbau optimal."}${protPct >= 0.8 ? " Deine Proteinversorgung ist stark." : " Versuche noch mehr Protein zu essen für bessere Ergebnisse."}`;
+    tip=null;
+  }
+
+  // Schritte extra
+  if(steps >= 8000) {
+    text += ` Deine ${steps.toLocaleString("de-DE")} Schritte (+${stepKcal} kcal) tragen zusätzlich zum Fettabbau bei.`;
+  }
+
+  return { icon, color, title, text, tip };
+}
+
+// ── MacroRing ─────────────────────────────────────────────────────────────────
+function MacroRing({ label, value, goal, color }) {
+  const pct=Math.min(value/goal,1), r=30, cx=38, cy=38, circ=2*Math.PI*r;
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
       <svg width="76" height="76" viewBox="0 0 76 76">
@@ -117,7 +199,7 @@ function MacroRing({label,value,goal,color}){
   );
 }
 
-function KcalBar({value,goal,hasTraining}){
+function KcalBar({ value, goal, hasTraining }) {
   const pct=Math.min(value/goal,1);
   return (
     <div style={{marginBottom:6}}>
@@ -140,153 +222,287 @@ function KcalBar({value,goal,hasTraining}){
   );
 }
 
-function DateNav({date,setDate}){
-  const isToday=date===todayStr();
+function DateNav({ date, setDate }) {
+  const isToday = date===todayDE();
   return (
     <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-      <button onClick={()=>setDate(d=>addDays(d,-1))} style={{background:"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:"#fff",fontSize:18,cursor:"pointer"}}>‹</button>
+      <button onClick={()=>setDate(d=>addDays(d,-1))} style={{background:"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:"#fff",fontSize:18,cursor:"pointer"}}>&#8249;</button>
       <div style={{flex:1,textAlign:"center"}}>
         <div style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:"#fff"}}>{isToday?"Heute":fmtDate(date)}</div>
         {!isToday&&<div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44"}}>{fmtDate(date)}</div>}
       </div>
-      <button onClick={()=>setDate(d=>addDays(d,1))} disabled={isToday} style={{background:isToday?"#ffffff05":"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:isToday?"#ffffff22":"#fff",fontSize:18,cursor:isToday?"default":"pointer"}}>›</button>
-      {!isToday&&<button onClick={()=>setDate(todayStr())} style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
+      <button onClick={()=>setDate(d=>addDays(d,1))} disabled={isToday} style={{background:isToday?"#ffffff05":"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:isToday?"#ffffff22":"#fff",fontSize:18,cursor:isToday?"default":"pointer"}}>&#8250;</button>
+      {!isToday&&<button onClick={()=>setDate(todayDE())} style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
     </div>
   );
 }
 
-function AddMealModal({onAdd,onClose}){
-  const [name,setName]=useState("");
-  const [type,setType]=useState("Snack");
-  const [kcal,setKcal]=useState("");
-  const [protein,setProtein]=useState("");
-  const [carbs,setCarbs]=useState("");
-  const [fat,setFat]=useState("");
-  function submit(){
-    if(!name.trim()||!kcal)return;
+// ── Tagesanalyse Karte ────────────────────────────────────────────────────────
+function DayAnalysisCard({ totals, goals, sessions, steps, baseGoals }) {
+  const a = analyzDay({ totals, goals, sessions, steps, baseGoals });
+  return (
+    <div style={{background:`linear-gradient(135deg,#16213e,#1a1a2e)`,borderRadius:16,padding:"16px",marginBottom:14,border:`1px solid ${a.color}33`,animation:"fadeIn 0.5s ease"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+        <span style={{fontSize:22}}>{a.icon}</span>
+        <div style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:a.color}}>{a.title}</div>
+      </div>
+      <div style={{fontFamily:"DM Sans",fontSize:13,color:"#ffffffbb",lineHeight:1.6}}>{a.text}</div>
+      {a.tip&&<div style={{marginTop:10,fontFamily:"DM Sans",fontSize:12,color:a.color,background:`${a.color}15`,borderRadius:8,padding:"8px 10px",fontStyle:"italic"}}>💡 {a.tip}</div>}
+    </div>
+  );
+}
+
+// ── Schritte Karte ────────────────────────────────────────────────────────────
+function StepsCard({ steps, setSteps }) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState(String(steps||""));
+  const goal = 8000;
+  const pct = Math.min((steps||0)/goal,1);
+  const kcal = Math.round(((steps||0)/1000)*STEPS_KCAL_PER_1000);
+
+  function save() {
+    const v = parseInt(input)||0;
+    setSteps(v);
+    setEditing(false);
+  }
+
+  return (
+    <div style={{background:"#16213e",borderRadius:14,padding:"14px 16px",marginBottom:14,border:"1px solid #ffffff0a"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:18}}>👟</span>
+          <span style={{fontFamily:"Playfair Display",fontSize:14,color:"#fff",fontStyle:"italic"}}>Schritte heute</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {kcal>0&&<span style={{fontFamily:"DM Sans",fontSize:11,color:"#34d399"}}>-{kcal} kcal</span>}
+          <button onClick={()=>{setInput(String(steps||""));setEditing(true);}} style={{background:"#ffffff0f",border:"none",borderRadius:8,padding:"4px 10px",color:"#ffffff88",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>✏️ Eintragen</button>
+        </div>
+      </div>
+      {editing?(
+        <div style={{display:"flex",gap:8,marginBottom:8}}>
+          <input type="number" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&save()}
+            placeholder="z.B. 8500" autoFocus style={{...fs({flex:1,padding:"8px 12px"})}}/>
+          <button onClick={save} style={{background:"#34d399",border:"none",borderRadius:10,padding:"0 16px",color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:13,cursor:"pointer"}}>OK</button>
+          <button onClick={()=>setEditing(false)} style={{background:"#ffffff15",border:"none",borderRadius:10,padding:"0 12px",color:"#fff",fontFamily:"DM Sans",fontSize:13,cursor:"pointer"}}>✕</button>
+        </div>
+      ):(
+        <div style={{fontFamily:"Playfair Display",fontSize:22,fontWeight:700,color:"#34d399",marginBottom:8}}>
+          {(steps||0).toLocaleString("de-DE")} <span style={{fontSize:13,color:"#ffffff44",fontFamily:"DM Sans",fontWeight:400}}>/ {goal.toLocaleString("de-DE")} Schritte</span>
+        </div>
+      )}
+      <div style={{height:5,background:"#ffffff10",borderRadius:99,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${pct*100}%`,background:"linear-gradient(90deg,#34d399,#6ee7b7)",borderRadius:99,transition:"width 0.7s cubic-bezier(.4,0,.2,1)",boxShadow:"0 0 8px #34d39988"}}/>
+      </div>
+      <div style={{marginTop:4,fontSize:11,color:"#ffffff33",fontFamily:"DM Sans",textAlign:"right"}}>
+        {Math.max(0,goal-(steps||0)).toLocaleString("de-DE")} Schritte bis zum Ziel
+      </div>
+    </div>
+  );
+}
+
+// ── Profil Modal ──────────────────────────────────────────────────────────────
+function ProfileModal({ profiles, activeId, onSwitch, onSave, onDelete, onClose }) {
+  const [view, setView] = useState("list");
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ name:"", weight:"", height:"", age:"", activity:"medium" });
+
+  function startEdit(p) { setEditing(p.id); setForm({name:p.name,weight:p.weight,height:p.height,age:p.age,activity:p.activity||"medium",gender:p.gender||"female"}); setView("edit"); }
+  function startNew() { setEditing(null); setForm({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female"}); setView("new"); }
+  function save() {
+    if(!form.name.trim()) return;
+    onSave({id:editing||Date.now().toString(),name:form.name,weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity,gender:form.gender});
+    setView("list");
+  }
+  const actLabels = {low:"Wenig aktiv",medium:"Moderat aktiv",high:"Sehr aktiv"};
+
+  if(view==="edit"||view==="new") return (
+    <div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"92vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>{view==="new"?"Neues Profil":"Profil bearbeiten"}</span>
+          <button onClick={()=>setView("list")} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+        </div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Geschlecht</div>
+          <div style={{display:"flex",gap:10}}>
+            {[["female","&#9792; Weiblich"],["male","&#9794; Männlich"]].map(([val,label])=>(
+              <button key={val} onClick={()=>setForm(p=>({...p,gender:val}))} style={{flex:1,background:form.gender===val?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff0f",border:"none",borderRadius:12,padding:"12px",color:form.gender===val?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:13,fontWeight:form.gender===val?700:400,cursor:"pointer"}} dangerouslySetInnerHTML={{__html:label}}/>
+            ))}
+          </div>
+        </div>
+        {[["Name","name","text","z.B. Toni"],["Gewicht (kg)","weight","number","z.B. 59"],["Größe (cm)","height","number","z.B. 168"],["Alter","age","number","z.B. 20"]].map(([label,key,type,ph])=>(
+          <div key={key} style={{marginBottom:12}}>
+            <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:4}}>{label}</div>
+            <input type={type} value={form[key]} onChange={e=>setForm(p=>({...p,[key]:e.target.value}))} placeholder={ph} style={fs()}/>
+          </div>
+        ))}
+        <div style={{marginBottom:16}}>
+          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Aktivitätslevel</div>
+          <div style={{display:"flex",gap:8}}>
+            {["low","medium","high"].map(a=>(
+              <button key={a} onClick={()=>setForm(p=>({...p,activity:a}))} style={{flex:1,background:form.activity===a?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:10,padding:"10px 4px",color:form.activity===a?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{actLabels[a]}</button>
+            ))}
+          </div>
+        </div>
+        {form.weight&&form.height&&form.age&&(()=>{
+          const g=calcGoals({weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity});
+          return (<div style={{background:"#ff6b9d15",border:"1px solid #ff6b9d33",borderRadius:12,padding:"12px 14px",marginBottom:16}}>
+            <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ff6b9d",fontWeight:600,marginBottom:6}}>Berechnete Tagesziele</div>
+            <div style={{display:"flex",gap:12,fontFamily:"DM Sans",fontSize:12,color:"#ffffff88",flexWrap:"wrap"}}>
+              <span>🔥 {g.kcal} kcal</span><span>💪 {g.protein}g P</span><span>🌾 {g.carbs}g KH</span><span>🥑 {g.fat}g F</span>
+            </div>
+          </div>);
+        })()}
+        <button onClick={save} disabled={!form.name.trim()} style={{width:"100%",background:form.name.trim()?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff15",border:"none",borderRadius:14,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:form.name.trim()?"pointer":"not-allowed"}}>Speichern ✦</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>Profile</span>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+        </div>
+        {profiles.map(p=>{
+          const g=calcGoals(p); const isActive=p.id===activeId;
+          return (<div key={p.id} style={{background:isActive?"#ff6b9d18":"#16213e",border:`1px solid ${isActive?"#ff6b9d55":"#ffffff0a"}`,borderRadius:14,padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:12}}>
+            <div onClick={()=>{onSwitch(p.id);onClose();}} style={{flex:1,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:38,height:38,borderRadius:"50%",background:isActive?"linear-gradient(135deg,#ff6b9d,#a78bfa)":"#ffffff15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff",fontFamily:"DM Sans",flexShrink:0}}>{p.gender==="male"?"♂":"♀"}</div>
+              <div>
+                <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{p.name} {isActive&&<span style={{color:"#ff6b9d",fontSize:11}}>&#10003; aktiv</span>}</div>
+                <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>{p.weight}kg · {p.age}J · {g.kcal} kcal</div>
+              </div>
+            </div>
+            <button onClick={()=>startEdit(p)} style={{background:"#ffffff0f",border:"none",borderRadius:8,padding:"6px 10px",color:"#ffffff88",fontSize:14,cursor:"pointer"}}>&#9998;</button>
+            {profiles.length>1&&<button onClick={()=>onDelete(p.id)} style={{background:"#ff6b9d15",border:"none",borderRadius:8,padding:"6px 10px",color:"#ff6b9d",fontSize:14,cursor:"pointer"}}>&#128465;</button>}
+          </div>);
+        })}
+        <button onClick={startNew} style={{width:"100%",background:"#34d39915",border:"1px dashed #34d39944",borderRadius:14,padding:14,color:"#34d399",fontFamily:"DM Sans",fontWeight:600,fontSize:13,cursor:"pointer",marginTop:4}}>+ Neues Profil erstellen</button>
+      </div>
+    </div>
+  );
+}
+
+// ── AddMealModal ──────────────────────────────────────────────────────────────
+function AddMealModal({ onAdd, onClose }) {
+  const [name,setName]=useState(""); const [type,setType]=useState("Snack");
+  const [kcal,setKcal]=useState(""); const [protein,setProtein]=useState("");
+  const [carbs,setCarbs]=useState(""); const [fat,setFat]=useState("");
+  function submit() {
+    if(!name.trim()||!kcal) return;
     onAdd({id:Date.now(),name,type,kcal:Number(kcal),protein:Number(protein)||0,carbs:Number(carbs)||0,fat:Number(fat)||0});
     onClose();
   }
   return (
     <div style={{position:"fixed",inset:0,background:"#000c",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(24px, env(safe-area-inset-bottom))"}}>
+      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
           <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>Mahlzeit eintragen</span>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer",padding:"0 4px"}}>✕</button>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer",padding:"0 4px"}}>&#10005;</button>
         </div>
         <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff66",marginBottom:14,background:"#ff6b9d12",border:"1px solid #ff6b9d22",borderRadius:10,padding:"10px 12px"}}>
           💬 Frag mich im Chat welche Nährwerte deine Mahlzeit hat – ich rechne es aus!
         </div>
-        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name (z.B. 1,5 Wiener Würstchen)" style={{...fs({marginBottom:10})}}/>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name (z.B. 1,5 Wiener Würstchen)" style={fs({marginBottom:10})}/>
         <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-          {MEAL_TYPE_OPTIONS.map(t=>(
-            <button key={t} onClick={()=>setType(t)} style={{flex:1,minWidth:70,background:type===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:8,padding:"8px 4px",color:type===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{t}</button>
-          ))}
+          {MEAL_TYPE_OPTIONS.map(t=>(<button key={t} onClick={()=>setType(t)} style={{flex:1,minWidth:70,background:type===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:8,padding:"8px 4px",color:type===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{t}</button>))}
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
           {[["Kalorien (kcal) *",kcal,setKcal],["Protein (g)",protein,setProtein],["Kohlenhydrate (g)",carbs,setCarbs],["Fett (g)",fat,setFat]].map(([label,val,set])=>(
             <div key={label}>
               <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44",marginBottom:4}}>{label}</div>
-              <input type="number" step="0.1" value={val} onChange={e=>set(e.target.value)} placeholder="0" style={{...fs({padding:"9px 12px"})}}/>
+              <input type="number" step="0.1" value={val} onChange={e=>set(e.target.value)} placeholder="0" style={fs({padding:"9px 12px"})}/>
             </div>
           ))}
         </div>
-        <button onClick={submit} disabled={!name.trim()||!kcal} style={{width:"100%",background:name&&kcal?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff15",border:"none",borderRadius:14,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:name&&kcal?"pointer":"not-allowed",boxShadow:name&&kcal?"0 6px 20px #ff6b9d44":"none"}}>
-          Eintragen ✦
-        </button>
+        <button onClick={submit} disabled={!name.trim()||!kcal} style={{width:"100%",background:name&&kcal?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff15",border:"none",borderRadius:14,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:name&&kcal?"pointer":"not-allowed",boxShadow:name&&kcal?"0 6px 20px #ff6b9d44":"none"}}>Eintragen ✦</button>
       </div>
     </div>
   );
 }
 
-function NutritionTab({allMeals,setAllMeals,allSessions,date,setDate}){
+// ── NutritionTab ──────────────────────────────────────────────────────────────
+function NutritionTab({ allMeals, setAllMeals, allSessions, allSteps, setAllSteps, date, setDate, baseGoals }) {
   const [showModal,setShowModal]=useState(false);
   const [filter,setFilter]=useState("Alle");
   const meals=allMeals[date]||[];
   const sessions=allSessions[date]||[];
-  const goals=computeGoals(allSessions,date);
+  const steps=allSteps[date]||0;
+  const goals=computeGoals(baseGoals,allSessions,date);
   const hasTraining=sessions.length>0;
   const totals=meals.reduce((a,m)=>({kcal:a.kcal+m.kcal,protein:a.protein+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat}),{kcal:0,protein:0,carbs:0,fat:0});
   const proteinPct=totals.protein/goals.protein;
   const filtered=filter==="Alle"?meals:meals.filter(m=>m.type===filter);
   function addMeal(meal){setAllMeals(prev=>({...prev,[date]:[meal,...(prev[date]||[])]}));}
   function removeMeal(id){setAllMeals(prev=>({...prev,[date]:(prev[date]||[]).filter(m=>m.id!==id)}));}
+  function setSteps(v){setAllSteps(prev=>({...prev,[date]:v}));}
+
   return (
     <div style={{paddingBottom:24}}>
       <DateNav date={date} setDate={setDate}/>
+      {/* Macro Dashboard */}
       <div style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",borderRadius:20,padding:18,marginBottom:14,border:"1px solid #ffffff0e"}}>
         <KcalBar value={totals.kcal} goal={goals.kcal} hasTraining={hasTraining}/>
-        {hasTraining&&(
-          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#f59e0b",marginBottom:10,textAlign:"center"}}>
-            🏋️ Ziele angepasst: +{goals.kcal-BASE_GOALS.kcal} kcal · +{goals.protein-BASE_GOALS.protein}g Protein
-          </div>
-        )}
+        {hasTraining&&(<div style={{fontFamily:"DM Sans",fontSize:11,color:"#f59e0b",marginBottom:10,textAlign:"center"}}>
+          🏋️ +{goals.kcal-baseGoals.kcal} kcal · +{goals.carbs-baseGoals.carbs}g KH durch Training
+        </div>)}
         <div style={{display:"flex",justifyContent:"space-around",marginTop:14}}>
           <MacroRing label="Protein" value={totals.protein} goal={goals.protein} color="#ff6b9d"/>
           <MacroRing label="Kohlenhydrate" value={totals.carbs} goal={goals.carbs} color="#a78bfa"/>
           <MacroRing label="Fett" value={totals.fat} goal={goals.fat} color="#34d399"/>
         </div>
       </div>
-      {sessions.length>0&&(
-        <div style={{marginBottom:14}}>
-          {sessions.map(s=>(
-            <div key={s.id} style={{background:"#16213e",borderRadius:12,padding:"10px 14px",marginBottom:8,border:"1px solid #f59e0b33",display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:16}}>{s.type==="Glute Day"?"🍑":s.type==="Back Day"?"💪":s.type==="Stepper"?"🚶‍♀️":"🏋️"}</span>
-              <div style={{flex:1}}>
-                <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#f59e0b",fontSize:13}}>{s.type}{s.stepperMin?` · ${s.stepperMin} min`:""}</div>
-                <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>+{s.type==="Stepper"?Math.round((s.stepperMin||10)*STEPPER_KCAL_PER_MIN):(TRAINING_BURN[s.type]||TRAINING_BURN["Eigenes Training"]).kcal} kcal Mehrbedarf</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {proteinPct<0.5&&meals.length>0&&(
-        <div style={{background:"#ff6b9d18",border:"1px solid #ff6b9d55",borderRadius:14,padding:"11px 14px",marginBottom:14,display:"flex",gap:10,alignItems:"center"}}>
-          <span style={{fontSize:18}}>⚠️</span>
-          <div>
-            <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#ff6b9d",fontSize:13}}>Protein-Ziel weit entfernt</div>
-            <div style={{fontFamily:"DM Sans",color:"#ffffff77",fontSize:12,marginTop:1}}>Nur {Math.round(proteinPct*100)}% – mehr Protein für deinen Gluteaufbau!</div>
+
+      {/* Tagesanalyse */}
+      <DayAnalysisCard totals={totals} goals={goals} sessions={sessions} steps={steps} baseGoals={baseGoals}/>
+
+      {/* Training badges */}
+      {sessions.length>0&&(<div style={{marginBottom:14}}>
+        {sessions.map(s=>(<div key={s.id} style={{background:"#16213e",borderRadius:12,padding:"10px 14px",marginBottom:8,border:"1px solid #f59e0b33",display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:16}}>{s.type==="Glute Day"?"🍑":s.type==="Back Day"?"💪":s.type==="Stepper"?"🚶‍♀️":"🏋️"}</span>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#f59e0b",fontSize:13}}>{s.type}{s.stepperMin?` · ${s.stepperMin} min`:""}</div>
+            <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>+{s.type==="Stepper"?Math.round((s.stepperMin||10)*STEPPER_KCAL_PER_MIN):(TRAINING_BURN[s.type]||TRAINING_BURN["Eigenes Training"]).kcal} kcal Mehrbedarf</div>
           </div>
+        </div>))}
+      </div>)}
+
+      {/* Protein reminder */}
+      {proteinPct<0.5&&meals.length>0&&(<div style={{background:"#ff6b9d18",border:"1px solid #ff6b9d55",borderRadius:14,padding:"11px 14px",marginBottom:14,display:"flex",gap:10,alignItems:"center"}}>
+        <span style={{fontSize:18}}>⚠️</span>
+        <div>
+          <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#ff6b9d",fontSize:13}}>Protein-Ziel weit entfernt</div>
+          <div style={{fontFamily:"DM Sans",color:"#ffffff77",fontSize:12,marginTop:1}}>Nur {Math.round(proteinPct*100)}% – mehr Protein für deinen Gluteaufbau!</div>
         </div>
-      )}
+      </div>)}
+
       <button onClick={()=>setShowModal(true)} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 18px #ff6b9d44",marginBottom:14}}>
         + Mahlzeit eintragen
       </button>
-      {meals.length>0&&(
-        <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:12}}>
-          {["Alle",...MEAL_TYPE_OPTIONS].map(t=>(
-            <button key={t} onClick={()=>setFilter(t)} style={{background:filter===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:99,padding:"5px 13px",color:filter===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{t}</button>
-          ))}
-        </div>
-      )}
+
+      {meals.length>0&&(<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:12}}>
+        {["Alle",...MEAL_TYPE_OPTIONS].map(t=>(<button key={t} onClick={()=>setFilter(t)} style={{background:filter===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:99,padding:"5px 13px",color:filter===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{t}</button>))}
+      </div>)}
+
       {filtered.length===0?(
-        <div style={{textAlign:"center",color:"#ffffff22",fontFamily:"DM Sans",fontSize:14,padding:"36px 0"}}>
-          {meals.length===0?"Noch nichts eingetragen ✨":"Keine Mahlzeiten in dieser Kategorie"}
-        </div>
+        <div style={{textAlign:"center",color:"#ffffff22",fontFamily:"DM Sans",fontSize:14,padding:"36px 0"}}>{meals.length===0?"Noch nichts eingetragen ✨":"Keine Mahlzeiten in dieser Kategorie"}</div>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
-          {filtered.map(meal=>(
-            <div key={meal.id} style={{background:"#16213e",borderRadius:13,padding:"13px 15px",border:"1px solid #ffffff09",animation:"fadeIn 0.3s ease",position:"relative"}}>
-              <button onClick={()=>removeMeal(meal.id)} style={{position:"absolute",top:10,right:11,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer",padding:"0 2px"}}>✕</button>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:7,paddingRight:20}}>
-                <div>
-                  <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{meal.name}</div>
-                  <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ff6b9d",marginTop:1}}>{meal.type}</div>
-                </div>
-                <div style={{fontFamily:"Playfair Display",fontSize:17,color:"#ff6b9d",fontWeight:700,flexShrink:0}}>
-                  {r1(meal.kcal)} <span style={{fontSize:10,color:"#ffffff44",fontFamily:"DM Sans",fontWeight:400}}>kcal</span>
-                </div>
+          {filtered.map(meal=>(<div key={meal.id} style={{background:"#16213e",borderRadius:13,padding:"13px 15px",border:"1px solid #ffffff09",animation:"fadeIn 0.3s ease",position:"relative"}}>
+            <button onClick={()=>removeMeal(meal.id)} style={{position:"absolute",top:10,right:11,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer",padding:"0 2px"}}>&#10005;</button>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:7,paddingRight:20}}>
+              <div>
+                <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{meal.name}</div>
+                <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ff6b9d",marginTop:1}}>{meal.type}</div>
               </div>
-              <div style={{display:"flex",gap:12}}>
-                {[["P",meal.protein,"#ff6b9d"],["KH",meal.carbs,"#a78bfa"],["F",meal.fat,"#34d399"]].map(([l,v,c])=>(
-                  <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
-                    <span style={{width:5,height:5,borderRadius:"50%",background:c,display:"inline-block"}}/>
-                    <span style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}>{l} {r1(v)}g</span>
-                  </div>
-                ))}
-              </div>
+              <div style={{fontFamily:"Playfair Display",fontSize:17,color:"#ff6b9d",fontWeight:700,flexShrink:0}}>{r1(meal.kcal)} <span style={{fontSize:10,color:"#ffffff44",fontFamily:"DM Sans",fontWeight:400}}>kcal</span></div>
             </div>
-          ))}
+            <div style={{display:"flex",gap:12}}>
+              {[["P",meal.protein,"#ff6b9d"],["KH",meal.carbs,"#a78bfa"],["F",meal.fat,"#34d399"]].map(([l,v,c])=>(<div key={l} style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:5,height:5,borderRadius:"50%",background:c,display:"inline-block"}}/><span style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}>{l} {r1(v)}g</span></div>))}
+            </div>
+          </div>))}
         </div>
       )}
       {showModal&&<AddMealModal onAdd={addMeal} onClose={()=>setShowModal(false)}/>}
@@ -294,22 +510,22 @@ function NutritionTab({allMeals,setAllMeals,allSessions,date,setDate}){
   );
 }
 
-function ExerciseRow({ex,onToggle,onRemove,onChange}){
+// ── ExerciseRow ───────────────────────────────────────────────────────────────
+function ExerciseRow({ ex, onToggle, onRemove, onChange }) {
   return (
     <div style={{background:"#16213e",borderRadius:12,padding:"11px 13px",marginBottom:9,border:ex.done?"1px solid #ff6b9d55":"1px solid #ffffff09"}}>
       <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
         <div onClick={onToggle} style={{width:24,height:24,borderRadius:"50%",border:`2px solid ${ex.done?"#ff6b9d":"#ffffff33"}`,background:ex.done?"#ff6b9d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
-          {ex.done&&<span style={{fontSize:12,color:"#fff"}}>✓</span>}
+          {ex.done&&<span style={{fontSize:12,color:"#fff"}}>&#10003;</span>}
         </div>
         <span style={{fontFamily:"DM Sans",fontWeight:600,color:ex.done?"#ffffff55":"#fff",fontSize:13,flex:1,textDecoration:ex.done?"line-through":"none"}}>{ex.name}</span>
-        <button onClick={onRemove} style={{background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer",padding:"0 2px"}}>🗑</button>
+        <button onClick={onRemove} style={{background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer",padding:"0 2px"}}>&#128465;</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
         {[["kg","weightStr","number","0.5"],["Sätze","sets","number","1"],["Wdh.","reps","text",""]].map(([label,key,type,step])=>(
           <div key={key}>
             <div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff33",marginBottom:3}}>{label}</div>
-            <input type={type} step={step||undefined} value={ex[key]} onChange={e=>onChange(ex.id,key,e.target.value)}
-              placeholder={label} style={{...fs({padding:"7px 9px",fontSize:12})}}/>
+            <input type={type} step={step||undefined} value={ex[key]} onChange={e=>onChange(ex.id,key,e.target.value)} placeholder={label} style={fs({padding:"7px 9px",fontSize:12})}/>
           </div>
         ))}
       </div>
@@ -317,7 +533,10 @@ function ExerciseRow({ex,onToggle,onRemove,onChange}){
   );
 }
 
-function TrainingTab({allSessions,setAllSessions,date,setDate}){
+// ── TrainingTab ───────────────────────────────────────────────────────────────
+function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, date, setDate }) {
+  const steps = allSteps[date]||0;
+  function setSteps(v){setAllSteps(prev=>({...prev,[date]:v}));}
   const [modal,setModal]=useState(null);
   const [exercises,setExercises]=useState([]);
   const [note,setNote]=useState("");
@@ -327,29 +546,24 @@ function TrainingTab({allSessions,setAllSessions,date,setDate}){
   const [newEx,setNewEx]=useState({name:"",weightStr:"",sets:"3",reps:"10"});
   const sessions=allSessions[date]||[];
 
-  function openTemplate(type){
-    setExercises(DEFAULT_TEMPLATES[type].map((e,i)=>({...e,id:i})));
-    setNote(""); setShowAddEx(false); setModal(type);
-  }
+  function openTemplate(type){setExercises(DEFAULT_TEMPLATES[type].map((e,i)=>({...e,id:i})));setNote("");setShowAddEx(false);setModal(type);}
   function updateEx(id,key,val){setExercises(prev=>prev.map(e=>e.id===id?{...e,[key]:val}:e));}
   function toggleEx(id){setExercises(prev=>prev.map(e=>e.id===id?{...e,done:!e.done}:e));}
   function removeEx(id){setExercises(prev=>prev.filter(e=>e.id!==id));}
   function addExercise(){
     if(!newEx.name.trim())return;
     setExercises(prev=>[...prev,{...newEx,id:Date.now(),done:false}]);
-    setNewEx({name:"",weightStr:"",sets:"3",reps:"10"}); setShowAddEx(false);
+    setNewEx({name:"",weightStr:"",sets:"3",reps:"10"});setShowAddEx(false);
   }
   function saveSession(){
     const tip=TRAINER_TIPS[Math.floor(Math.random()*TRAINER_TIPS.length)];
     const name=modal==="custom"?(customName||"Eigenes Training"):modal;
-    const session={id:Date.now(),type:name,exercises:[...exercises],note,tip};
-    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),session]}));
+    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:name,exercises:[...exercises],note,tip}]}));
     setModal(null);
   }
   function saveStepper(){
     const tip=TRAINER_TIPS[Math.floor(Math.random()*TRAINER_TIPS.length)];
-    const session={id:Date.now(),type:"Stepper",stepperMin,exercises:[{id:0,name:`Stepper ${stepperMin} min`,weightStr:"",sets:"1",reps:`${stepperMin} Min`,done:true}],note:"",tip};
-    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),session]}));
+    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:"Stepper",stepperMin,exercises:[{id:0,name:`Stepper ${stepperMin} min`,weightStr:"",sets:"1",reps:`${stepperMin} Min`,done:true}],note:"",tip}]}));
     setModal(null);
   }
   function removeSession(id){setAllSessions(prev=>({...prev,[date]:(prev[date]||[]).filter(s=>s.id!==id)}));}
@@ -358,6 +572,7 @@ function TrainingTab({allSessions,setAllSessions,date,setDate}){
   return (
     <div style={{paddingBottom:24}}>
       <DateNav date={date} setDate={setDate}/>
+      <StepsCard steps={steps} setSteps={setSteps}/>
       <div style={{background:"#a78bfa18",border:"1px solid #a78bfa44",borderRadius:13,padding:"11px 14px",marginBottom:18,display:"flex",gap:9,alignItems:"center"}}>
         <span style={{fontSize:16}}>🏥</span>
         <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}><strong style={{color:"#a78bfa"}}>Skoliose & Hohlkreuz:</strong> Form vor Gewicht – neutrales Becken, Kernspannung halten.</div>
@@ -368,145 +583,163 @@ function TrainingTab({allSessions,setAllSessions,date,setDate}){
           {label:"Back Day",ic:"💪",border:"#ff6b9d33",action:()=>openTemplate("Back Day")},
           {label:"Eigenes",ic:"➕",border:"#34d39933",action:()=>{setExercises([]);setCustomName("");setNote("");setModal("custom");}},
           {label:"Stepper",ic:"🚶‍♀️",border:"#f59e0b33",action:()=>{setStepperMin(10);setModal("stepper");}},
-        ].map(({label,ic,border,action})=>(
-          <button key={label} onClick={action} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:`1px solid ${border}`,borderRadius:15,padding:"15px 8px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
-            <div style={{fontSize:24,marginBottom:3}}>{ic}</div>
-            <div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700}}>{label}</div>
-          </button>
-        ))}
+        ].map(({label,ic,border,action})=>(<button key={label} onClick={action} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:`1px solid ${border}`,borderRadius:15,padding:"15px 8px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
+          <div style={{fontSize:24,marginBottom:3}}>{ic}</div>
+          <div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700}}>{label}</div>
+        </button>))}
       </div>
 
-      {modal==="stepper"&&(
-        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-          <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:18}}>
-              <span style={{fontFamily:"Playfair Display",fontSize:19,fontWeight:700,color:"#fff"}}>🚶‍♀️ Stepper</span>
-              <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>✕</button>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
-              <button onClick={()=>setStepperMin(m=>Math.max(1,m-5))} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>−</button>
-              <div style={{flex:1,textAlign:"center"}}>
-                <input type="number" min="1" value={stepperMin} onChange={e=>setStepperMin(Math.max(1,Number(e.target.value)))}
-                  style={{background:"transparent",border:"none",textAlign:"center",fontSize:42,fontWeight:700,color:"#f59e0b",fontFamily:"Playfair Display",outline:"none",width:"120px"}}/>
-                <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff44"}}>Minuten · ca. {Math.round(stepperMin*STEPPER_KCAL_PER_MIN)} kcal</div>
-              </div>
-              <button onClick={()=>setStepperMin(m=>m+5)} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>+</button>
-            </div>
-            <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
-              {[5,10,15,20,30,45,60].map(m=>(
-                <button key={m} onClick={()=>setStepperMin(m)} style={{background:stepperMin===m?"#f59e0b":"#ffffff0f",border:"none",borderRadius:99,padding:"6px 14px",color:stepperMin===m?"#000":"#ffffff66",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",fontWeight:stepperMin===m?700:400}}>{m} min</button>
-              ))}
-            </div>
-            <button onClick={saveStepper} style={{width:"100%",background:"linear-gradient(135deg,#f59e0b,#d97706)",border:"none",borderRadius:13,padding:15,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer"}}>Speichern ✨</button>
+      {modal==="stepper"&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+        <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:18}}>
+            <span style={{fontFamily:"Playfair Display",fontSize:19,fontWeight:700,color:"#fff"}}>🚶‍♀️ Stepper</span>
+            <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
           </div>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
+            <button onClick={()=>setStepperMin(m=>Math.max(1,m-5))} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>&#8722;</button>
+            <div style={{flex:1,textAlign:"center"}}>
+              <input type="number" min="1" value={stepperMin} onChange={e=>setStepperMin(Math.max(1,Number(e.target.value)))} style={{background:"transparent",border:"none",textAlign:"center",fontSize:42,fontWeight:700,color:"#f59e0b",fontFamily:"Playfair Display",outline:"none",width:"120px"}}/>
+              <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff44"}}>Minuten · ca. {Math.round(stepperMin*STEPPER_KCAL_PER_MIN)} kcal</div>
+            </div>
+            <button onClick={()=>setStepperMin(m=>m+5)} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>&#43;</button>
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+            {[5,10,15,20,30,45,60].map(m=>(<button key={m} onClick={()=>setStepperMin(m)} style={{background:stepperMin===m?"#f59e0b":"#ffffff0f",border:"none",borderRadius:99,padding:"6px 14px",color:stepperMin===m?"#000":"#ffffff66",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",fontWeight:stepperMin===m?700:400}}>{m} min</button>))}
+          </div>
+          <button onClick={saveStepper} style={{width:"100%",background:"linear-gradient(135deg,#f59e0b,#d97706)",border:"none",borderRadius:13,padding:15,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer"}}>Speichern ✨</button>
         </div>
-      )}
+      </div>)}
 
-      {(modal==="Glute Day"||modal==="Back Day"||modal==="custom")&&(
-        <div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-          <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-              <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>{modal==="custom"?"✨ Eigenes Training":modal}</span>
-              <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>✕</button>
-            </div>
-            {modal==="custom"&&<input value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="Trainingsname…" style={{...fs({marginBottom:12})}}/>}
-            <div style={{background:"#a78bfa15",borderRadius:9,padding:"8px 12px",marginBottom:13,fontFamily:"DM Sans",fontSize:11,color:"#c4b5fd"}}>⚡ Gewicht anpassen falls du heute mehr oder weniger schaffst!</div>
-            {exercises.map(ex=>(
-              <ExerciseRow key={ex.id} ex={ex} onToggle={()=>toggleEx(ex.id)} onRemove={()=>removeEx(ex.id)} onChange={updateEx}/>
-            ))}
-            {showAddEx?(
-              <div style={{background:"#0f0f23",borderRadius:11,padding:13,marginBottom:11,border:"1px solid #34d39933"}}>
-                <div style={{fontFamily:"DM Sans",fontSize:12,fontWeight:600,color:"#34d399",marginBottom:9}}>Neue Übung</div>
-                <input value={newEx.name} onChange={e=>setNewEx(p=>({...p,name:e.target.value}))} placeholder="Übungsname" style={{...fs({marginBottom:8})}}/>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:9}}>
-                  <input type="number" step="0.5" value={newEx.weightStr} onChange={e=>setNewEx(p=>({...p,weightStr:e.target.value}))} placeholder="kg" style={{...fs({padding:"8px 10px",fontSize:12})}}/>
-                  <input type="number" value={newEx.sets} onChange={e=>setNewEx(p=>({...p,sets:e.target.value}))} placeholder="Sätze" style={{...fs({padding:"8px 10px",fontSize:12})}}/>
-                  <input value={newEx.reps} onChange={e=>setNewEx(p=>({...p,reps:e.target.value}))} placeholder="Wdh." style={{...fs({padding:"8px 10px",fontSize:12})}}/>
-                </div>
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={addExercise} style={{flex:1,background:"#34d399",border:"none",borderRadius:9,padding:10,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:12,cursor:"pointer"}}>Hinzufügen</button>
-                  <button onClick={()=>setShowAddEx(false)} style={{background:"#ffffff15",border:"none",borderRadius:9,padding:"10px 14px",color:"#fff",fontFamily:"DM Sans",fontSize:12,cursor:"pointer"}}>Abbrechen</button>
-                </div>
-              </div>
-            ):(
-              <button onClick={()=>setShowAddEx(true)} style={{width:"100%",background:"#34d39912",border:"1px dashed #34d39933",borderRadius:11,padding:11,color:"#34d399",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",marginBottom:11}}>+ Übung hinzufügen</button>
-            )}
-            <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Notizen…" rows={2} style={{...fs({resize:"none",marginBottom:14})}}/>
-            <button onClick={saveSession} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:13,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 6px 20px #ff6b9d44"}}>
-              Session speichern ✨
-            </button>
+      {(modal==="Glute Day"||modal==="Back Day"||modal==="custom")&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+        <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>{modal==="custom"?"✨ Eigenes Training":modal}</span>
+            <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
           </div>
+          {modal==="custom"&&<input value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="Trainingsname…" style={fs({marginBottom:12})}/>}
+          <div style={{background:"#a78bfa15",borderRadius:9,padding:"8px 12px",marginBottom:13,fontFamily:"DM Sans",fontSize:11,color:"#c4b5fd"}}>⚡ Gewicht anpassen falls du heute mehr oder weniger schaffst!</div>
+          {exercises.map(ex=><ExerciseRow key={ex.id} ex={ex} onToggle={()=>toggleEx(ex.id)} onRemove={()=>removeEx(ex.id)} onChange={updateEx}/>)}
+          {showAddEx?(
+            <div style={{background:"#0f0f23",borderRadius:11,padding:13,marginBottom:11,border:"1px solid #34d39933"}}>
+              <div style={{fontFamily:"DM Sans",fontSize:12,fontWeight:600,color:"#34d399",marginBottom:9}}>Neue Übung</div>
+              <input value={newEx.name} onChange={e=>setNewEx(p=>({...p,name:e.target.value}))} placeholder="Übungsname" style={fs({marginBottom:8})}/>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:9}}>
+                <input type="number" step="0.5" value={newEx.weightStr} onChange={e=>setNewEx(p=>({...p,weightStr:e.target.value}))} placeholder="kg" style={fs({padding:"8px 10px",fontSize:12})}/>
+                <input type="number" value={newEx.sets} onChange={e=>setNewEx(p=>({...p,sets:e.target.value}))} placeholder="Sätze" style={fs({padding:"8px 10px",fontSize:12})}/>
+                <input value={newEx.reps} onChange={e=>setNewEx(p=>({...p,reps:e.target.value}))} placeholder="Wdh." style={fs({padding:"8px 10px",fontSize:12})}/>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={addExercise} style={{flex:1,background:"#34d399",border:"none",borderRadius:9,padding:10,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:12,cursor:"pointer"}}>Hinzufügen</button>
+                <button onClick={()=>setShowAddEx(false)} style={{background:"#ffffff15",border:"none",borderRadius:9,padding:"10px 14px",color:"#fff",fontFamily:"DM Sans",fontSize:12,cursor:"pointer"}}>Abbrechen</button>
+              </div>
+            </div>
+          ):(
+            <button onClick={()=>setShowAddEx(true)} style={{width:"100%",background:"#34d39912",border:"1px dashed #34d39933",borderRadius:11,padding:11,color:"#34d399",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",marginBottom:11}}>+ Übung hinzufügen</button>
+          )}
+          <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Notizen…" rows={2} style={fs({resize:"none",marginBottom:14})}/>
+          <button onClick={saveSession} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:13,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 6px 20px #ff6b9d44"}}>Session speichern ✨</button>
         </div>
-      )}
+      </div>)}
 
       {sessions.length===0?(
         <div style={{textAlign:"center",color:"#ffffff22",fontFamily:"DM Sans",fontSize:14,padding:"28px 0"}}>Noch keine Sessions heute 🏋️</div>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:13}}>
-          {sessions.map(s=>(
-            <div key={s.id} style={{background:"#16213e",borderRadius:15,padding:17,border:"1px solid #ffffff09",animation:"fadeIn 0.4s ease",position:"relative"}}>
-              <button onClick={()=>removeSession(s.id)} style={{position:"absolute",top:12,right:13,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer"}}>✕</button>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:11}}>
-                <span style={{fontSize:18}}>{icon(s.type)}</span>
-                <span style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:"#fff"}}>{s.type}</span>
-                {s.stepperMin&&<span style={{fontFamily:"DM Sans",fontSize:12,color:"#f59e0b"}}>{s.stepperMin} min</span>}
-              </div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:11}}>
-                {s.exercises.map(e=>(
-                  <span key={e.id} style={{background:e.done?"#ff6b9d22":"#ffffff09",border:`1px solid ${e.done?"#ff6b9d44":"#ffffff09"}`,borderRadius:99,padding:"3px 9px",fontFamily:"DM Sans",fontSize:11,color:e.done?"#ff9ec8":"#ffffff44"}}>
-                    {e.done?"✓ ":""}{e.name}{e.weightStr?` · ${e.weightStr}kg`:""} {e.sets}×{e.reps}
-                  </span>
-                ))}
-              </div>
-              {s.note&&<div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff55",marginBottom:10,fontStyle:"italic"}}>📝 {s.note}</div>}
-              <div style={{background:"#a78bfa15",border:"1px solid #a78bfa33",borderRadius:9,padding:"9px 11px",fontFamily:"DM Sans",fontSize:12,color:"#c4b5fd"}}>{s.tip}</div>
+          {sessions.map(s=>(<div key={s.id} style={{background:"#16213e",borderRadius:15,padding:17,border:"1px solid #ffffff09",animation:"fadeIn 0.4s ease",position:"relative"}}>
+            <button onClick={()=>removeSession(s.id)} style={{position:"absolute",top:12,right:13,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer"}}>&#10005;</button>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:11}}>
+              <span style={{fontSize:18}}>{icon(s.type)}</span>
+              <span style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:"#fff"}}>{s.type}</span>
+              {s.stepperMin&&<span style={{fontFamily:"DM Sans",fontSize:12,color:"#f59e0b"}}>{s.stepperMin} min</span>}
             </div>
-          ))}
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:11}}>
+              {s.exercises.map(e=>(<span key={e.id} style={{background:e.done?"#ff6b9d22":"#ffffff09",border:`1px solid ${e.done?"#ff6b9d44":"#ffffff09"}`,borderRadius:99,padding:"3px 9px",fontFamily:"DM Sans",fontSize:11,color:e.done?"#ff9ec8":"#ffffff44"}}>
+                {e.done?"✓ ":""}{e.name}{e.weightStr?` · ${e.weightStr}kg`:""} {e.sets}×{e.reps}
+              </span>))}
+            </div>
+            {s.note&&<div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff55",marginBottom:10,fontStyle:"italic"}}>📝 {s.note}</div>}
+            <div style={{background:"#a78bfa15",border:"1px solid #a78bfa33",borderRadius:9,padding:"9px 11px",fontFamily:"DM Sans",fontSize:12,color:"#c4b5fd"}}>{s.tip}</div>
+          </div>))}
         </div>
       )}
     </div>
   );
 }
 
-function App(){
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
   const [tab,setTab]=useState("nutrition");
-  const [currentDate,setCurrentDate]=useState(todayStr());
-  const [allMeals,setAllMeals]=useLS("fitness_meals",{});
-  const [allSessions,setAllSessions]=useLS("fitness_sessions",{});
-  const todayMeals=allMeals[todayStr()]||[];
+  const [currentDate,setCurrentDate]=useState(todayDE());
+  const [showProfile,setShowProfile]=useState(false);
+  const [profiles,setProfiles]=useLS("fitness_profiles",[DEFAULT_PROFILE]);
+  const [activeProfileId,setActiveProfileId]=useLS("fitness_active_profile","toni");
+  const [allMeals,setAllMeals]=useLS("fitness_meals_v2",{});
+  const [allSessions,setAllSessions]=useLS("fitness_sessions_v2",{});
+  const [allSteps,setAllSteps]=useLS("fitness_steps_v1",{});
+
+  const activeProfile=profiles.find(p=>p.id===activeProfileId)||profiles[0]||DEFAULT_PROFILE;
+  const baseGoals=calcGoals(activeProfile);
+  const profileMeals=allMeals[activeProfileId]||{};
+  const profileSessions=allSessions[activeProfileId]||{};
+  const profileSteps=allSteps[activeProfileId]||{};
+
+  function setProfileMeals(fn){setAllMeals(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
+  function setProfileSessions(fn){setAllSessions(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
+  function setProfileSteps(fn){setAllSteps(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
+
+  function saveProfile(p){setProfiles(prev=>prev.find(x=>x.id===p.id)?prev.map(x=>x.id===p.id?p:x):[...prev,p]);setActiveProfileId(p.id);}
+  function deleteProfile(id){setProfiles(prev=>prev.filter(p=>p.id!==id));if(activeProfileId===id)setActiveProfileId(profiles.find(p=>p.id!==id)?.id||"toni");}
+
+  const todayMeals=profileMeals[todayDE()]||[];
   const todayKcal=r1(todayMeals.reduce((a,m)=>a+m.kcal,0));
   const setDate=useCallback(fn=>{setCurrentDate(prev=>typeof fn==="function"?fn(prev):fn);},[]);
+
+  // Datum täglich aktualisieren
+  useEffect(()=>{
+    const check=setInterval(()=>{
+      const de=todayDE();
+      setCurrentDate(prev=>prev===todayDE()?prev:de);
+    },60000);
+    return()=>clearInterval(check);
+  },[]);
 
   return (
     <div style={{minHeight:"100vh",background:"#0f0f23",fontFamily:"DM Sans,sans-serif",maxWidth:480,margin:"0 auto",paddingBottom:"max(80px,calc(80px + env(safe-area-inset-bottom)))"}}>
       <div style={{background:"linear-gradient(180deg,#16213e,#0f0f23)",padding:"max(22px,calc(14px + env(safe-area-inset-top))) 18px 14px",borderBottom:"1px solid #ffffff08"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
-            <div style={{fontFamily:"Playfair Display",fontSize:24,fontWeight:700,color:"#fff",lineHeight:1.1}}>Hey, Schatz ✨</div>
+            <div style={{fontFamily:"Playfair Display",fontSize:24,fontWeight:700,color:"#fff",lineHeight:1.1}}>Hey, {activeProfile.name}! ✨</div>
             <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff44",marginTop:3}}>
-              {new Date().toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}
+              {new Date().toLocaleDateString("de-DE",{timeZone:"Europe/Berlin",weekday:"long",day:"numeric",month:"long"})}
             </div>
           </div>
-          <div style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:12,padding:"7px 13px",textAlign:"center"}}>
-            <div style={{fontFamily:"Playfair Display",fontSize:17,fontWeight:700,color:"#ff6b9d"}}>{todayKcal}</div>
-            <div style={{fontFamily:"DM Sans",fontSize:9,color:"#ffffff44"}}>kcal heute</div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:12,padding:"7px 13px",textAlign:"center"}}>
+              <div style={{fontFamily:"Playfair Display",fontSize:17,fontWeight:700,color:"#ff6b9d"}}>{todayKcal}</div>
+              <div style={{fontFamily:"DM Sans",fontSize:9,color:"#ffffff44"}}>kcal heute</div>
+            </div>
+            <button onClick={()=>setShowProfile(true)} style={{width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#ff6b9d,#a78bfa)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff",fontFamily:"DM Sans",flexShrink:0}}>
+              {activeProfile.gender==="male"?"♂":"♀"}
+            </button>
           </div>
         </div>
       </div>
+
       <div style={{padding:"16px 14px 0"}}>
         {tab==="nutrition"
-          ?<NutritionTab allMeals={allMeals} setAllMeals={setAllMeals} allSessions={allSessions} date={currentDate} setDate={setDate}/>
-          :<TrainingTab allSessions={allSessions} setAllSessions={setAllSessions} date={currentDate} setDate={setDate}/>}
+          ?<NutritionTab allMeals={profileMeals} setAllMeals={setProfileMeals} allSessions={profileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate} baseGoals={baseGoals}/>
+          :<TrainingTab allSessions={profileSessions} setAllSessions={setProfileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate}/>}
       </div>
+
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(20,28,56,0.97)",backdropFilter:"blur(20px)",borderTop:"1px solid #ffffff0e",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom)"}}>
-        {[{id:"nutrition",label:"Ernährung",icon:"🥗"},{id:"training",label:"Training",icon:"🏋️"}].map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",padding:"13px 0 15px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-            <span style={{fontSize:21,filter:tab===t.id?"none":"grayscale(1) opacity(0.35)"}}>{t.icon}</span>
-            <span style={{fontFamily:"DM Sans",fontSize:10,fontWeight:600,color:tab===t.id?"#ff6b9d":"#ffffff33",letterSpacing:"0.04em"}}>{t.label}</span>
-            {tab===t.id&&<div style={{width:22,height:2,background:"#ff6b9d",borderRadius:99,boxShadow:"0 0 7px #ff6b9d"}}/>}
-          </button>
-        ))}
+        {[{id:"nutrition",label:"Ernährung",icon:"🥗"},{id:"training",label:"Training",icon:"🏋️"}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",padding:"13px 0 15px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+          <span style={{fontSize:21,filter:tab===t.id?"none":"grayscale(1) opacity(0.35)"}}>{t.icon}</span>
+          <span style={{fontFamily:"DM Sans",fontSize:10,fontWeight:600,color:tab===t.id?"#ff6b9d":"#ffffff33",letterSpacing:"0.04em"}}>{t.label}</span>
+          {tab===t.id&&<div style={{width:22,height:2,background:"#ff6b9d",borderRadius:99,boxShadow:"0 0 7px #ff6b9d"}}/>}
+        </button>))}
       </div>
+
+      {showProfile&&<ProfileModal profiles={profiles} activeId={activeProfileId} onSwitch={setActiveProfileId} onSave={saveProfile} onDelete={deleteProfile} onClose={()=>setShowProfile(false)}/>}
     </div>
   );
 }
