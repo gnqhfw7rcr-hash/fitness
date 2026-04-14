@@ -20,313 +20,330 @@
   input[type=number]::-webkit-inner-spin-button{opacity:.3;}
   input::placeholder,textarea::placeholder{color:#ffffff22 !important;}
   @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useCallback, useEffect, useMemo } = React;
+const { useState, useCallback, useEffect } = React;
 
-// ── Deutsche Zeit ─────────────────────────────────────────────────────────────
+// ── Zeit ──────────────────────────────────────────────────────────────────────
 function todayDE() {
-  return new Date().toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })
-    .split(".").reverse().map((p,i) => i===0?p:(p.length===1?"0"+p:p)).join("-");
+  return new Date().toLocaleDateString("de-DE",{timeZone:"Europe/Berlin"})
+    .split(".").reverse().map((p,i)=>i===0?p:p.padStart(2,"0")).join("-");
 }
-// todayDE() → "2025-04-14" in Berliner Zeit
-function addDays(dateStr, n) {
-  const [y,m,d] = dateStr.split("-").map(Number);
-  const dt = new Date(Date.UTC(y,m-1,d));
+function addDays(d,n){
+  const [y,m,dy]=d.split("-").map(Number);
+  const dt=new Date(Date.UTC(y,m-1,dy));
   dt.setUTCDate(dt.getUTCDate()+n);
-  const yy=dt.getUTCFullYear(), mm=String(dt.getUTCMonth()+1).padStart(2,"0"), dd=String(dt.getUTCDate()).padStart(2,"0");
-  return `${yy}-${mm}-${dd}`;
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,"0")}-${String(dt.getUTCDate()).padStart(2,"0")}`;
 }
-function fmtDate(dateStr) {
-  const [y,m,d] = dateStr.split("-").map(Number);
-  return new Date(Date.UTC(y,m-1,d)).toLocaleDateString("de-DE",{timeZone:"UTC",weekday:"short",day:"numeric",month:"short"});
-}
-
-// ── Kalorien-Berechnung (Mifflin-St Jeor) ─────────────────────────────────────
-function calcGoals(profile) {
-  const { weight, height, age, activity } = profile;
-  if (!weight || !height || !age) return { kcal: 1700, protein: Math.round((weight||59)*1.8), carbs: 170, fat: 55 };
-  const bmr = (profile.gender === "male") ? 10*weight + 6.25*height - 5*age + 5 : 10*weight + 6.25*height - 5*age - 161;
-  const factors = { low:1.375, medium:1.55, high:1.725 };
-  const tdee = Math.round(bmr*(factors[activity]||1.55));
-  const kcal = tdee - 200;
-  const protein = Math.round(weight*1.8);
-  const fat = Math.round(weight*0.9);
-  const carbs = Math.round((kcal - protein*4 - fat*9)/4);
-  return { kcal: Math.max(kcal,1400), protein, carbs: Math.max(carbs,100), fat };
+function fmtDate(d){
+  const [y,m,dy]=d.split("-").map(Number);
+  return new Date(Date.UTC(y,m-1,dy)).toLocaleDateString("de-DE",{timeZone:"UTC",weekday:"short",day:"numeric",month:"short"});
 }
 
-const TRAINING_BURN = {
-  "Glute Day":  { kcal:220, carbs:20 },
-  "Back Day":   { kcal:200, carbs:18 },
-  "Stepper":    { kcal:0,   carbs:0  },
-  "Eigenes Training": { kcal:180, carbs:15 },
-};
-const STEPPER_KCAL_PER_MIN = 5.5;
-const STEPS_KCAL_PER_1000 = 40; // ~40 kcal pro 1000 Schritte
-
-const DEFAULT_TEMPLATES = {
-  "Glute Day": [
-    { name:"Hip Thrust",    weightStr:"95",   sets:"3", reps:"8",           done:false },
-    { name:"Kickbacks",     weightStr:"13",   sets:"3", reps:"8\u201310",   done:false },
-    { name:"Step Ups",      weightStr:"17",   sets:"3", reps:"8\u201310",   done:false },
-    { name:"Glute Bridges", weightStr:"",     sets:"3", reps:"bis Versagen",done:false },
-  ],
-  "Back Day": [
-    { name:"Lat Pulldown",  weightStr:"37.5", sets:"3", reps:"10", done:false },
-    { name:"Enges Rudern",  weightStr:"27.5", sets:"3", reps:"10", done:false },
-    { name:"Face Pulls",    weightStr:"",     sets:"3", reps:"15", done:false },
-  ],
-};
-
-const TRAINER_TIPS = [
-  "💪 Spannung im Gesäß vor jeder Wiederholung aufbauen – aktivieren, nicht nur bewegen!",
-  "🔥 Hip Thrusts: Becken ganz oben 2 Sekunden halten. Qualität schlägt Tempo.",
-  "⚡ Skoliose-Check: Neutrales Becken, keine Überstreckung im Hohlkreuz!",
-  "🎯 Kickback: Geist-Muskel-Verbindung – stell dir vor, du drückst gegen echten Widerstand.",
-  "💡 Nach Back Day: Schultermobilisation & Brustdehnung nicht vergessen.",
-  "🏋️ Form ist alles – Gewicht ist sekundär. Lieber perfekte Technik.",
-  "🌙 7–9h Schlaf = Muskelaufbau-Zeit. Nicht vernachlässigen!",
-  "🥩 25–35g Protein direkt nach dem Training für optimale Muskelproteinsynthese.",
-  "🍑 Hintern anspannen bevor die Hüfte hochgeht – dann erst drücken.",
-  "💧 Mindestens 2–3L Wasser am Trainingstag.",
+// ── Konstanten ────────────────────────────────────────────────────────────────
+const CARDIO_LIST = [
+  {name:"Laufen",icon:"🏃‍♀️",kcalPerMin:9},
+  {name:"Fahrrad",icon:"🚴‍♀️",kcalPerMin:7},
+  {name:"Schwimmen",icon:"🏊‍♀️",kcalPerMin:8},
+  {name:"Seilspringen",icon:"🪢",kcalPerMin:11},
+  {name:"Ellipse",icon:"⚙️",kcalPerMin:6},
+  {name:"Rudern",icon:"🚣‍♀️",kcalPerMin:7},
+  {name:"Stepper",icon:"🚶‍♀️",kcalPerMin:6},
+  {name:"Spinning",icon:"🔄",kcalPerMin:8},
+  {name:"HIIT",icon:"⚡",kcalPerMin:12},
+  {name:"Walken",icon:"🚶",kcalPerMin:4},
+];
+const SPORT_LIST = [
+  {name:"Tennis",icon:"🎾",kcalPerMin:7},
+  {name:"Volleyball",icon:"🏐",kcalPerMin:5},
+  {name:"Basketball",icon:"🏀",kcalPerMin:7},
+  {name:"Tanzen",icon:"💃",kcalPerMin:5},
+  {name:"Yoga",icon:"🧘‍♀️",kcalPerMin:3},
+  {name:"Pilates",icon:"🤸‍♀️",kcalPerMin:4},
+  {name:"Boxen",icon:"🥊",kcalPerMin:10},
+  {name:"Klettern",icon:"🧗‍♀️",kcalPerMin:8},
+  {name:"Fußball",icon:"⚽",kcalPerMin:8},
+  {name:"Badminton",icon:"🏸",kcalPerMin:6},
+  {name:"Wandern",icon:"🥾",kcalPerMin:5},
+  {name:"Surfen",icon:"🏄‍♀️",kcalPerMin:5},
 ];
 
+const STEPS_KCAL_PER_1000 = 40;
+const DEFAULT_TEMPLATES = {
+  "Glute Day":[
+    {name:"Hip Thrust",weightStr:"95",sets:"3",reps:"8",done:false},
+    {name:"Kickbacks",weightStr:"13",sets:"3",reps:"8\u201310",done:false},
+    {name:"Step Ups",weightStr:"17",sets:"3",reps:"8\u201310",done:false},
+    {name:"Glute Bridges",weightStr:"",sets:"3",reps:"bis Versagen",done:false},
+  ],
+  "Back Day":[
+    {name:"Lat Pulldown",weightStr:"37.5",sets:"3",reps:"10",done:false},
+    {name:"Enges Rudern",weightStr:"27.5",sets:"3",reps:"10",done:false},
+    {name:"Face Pulls",weightStr:"",sets:"3",reps:"15",done:false},
+  ],
+};
+
 const MEAL_TYPE_OPTIONS = ["Frühstück","Mittagessen","Abendessen","Snack"];
-const DEFAULT_PROFILE = { id:"toni", name:"Toni", weight:59, height:168, age:20, activity:"medium", gender:"female" };
+const DEFAULT_PROFILE = {id:"toni",name:"Toni",weight:59,height:168,age:20,activity:"medium",gender:"female",hasScoliosis:true,goal:"glute"};
 
-// ── Utils ─────────────────────────────────────────────────────────────────────
-const r1 = v => Math.round(Number(v)*10)/10;
+// ── Trainer Tipps (profilabhängig) ────────────────────────────────────────────
+function getTrainerTips(profile, sessions) {
+  const base = [
+    "🏋️ Form ist alles – Gewicht ist sekundär. Lieber perfekte Technik.",
+    "🌙 7–9h Schlaf = Muskelaufbau-Zeit. Nicht vernachlässigen!",
+    "🥩 25–35g Protein direkt nach dem Training für optimale Muskelproteinsynthese.",
+    "💧 Mindestens 2–3L Wasser am Trainingstag.",
+    "🔥 Progressive Überlastung: Steigere Gewicht oder Wiederholungen jede Woche etwas.",
+    "⏱ Pausenzeiten einhalten – 60–90 Sek zwischen Sätzen für Hypertrophie.",
+  ];
+  const glute = [
+    "💪 Spannung im Gesäß vor jeder Wiederholung aufbauen – aktivieren!",
+    "🔥 Hip Thrusts: Becken oben 2 Sek halten. Qualität schlägt Tempo.",
+    "🎯 Kickback: Geist-Muskel-Verbindung – stell dir vor, du drückst gegen Widerstand.",
+    "🍑 Hintern anspannen bevor die Hüfte hochgeht – dann erst drücken.",
+    "🌊 Vollständige Streckung bei Glute-Übungen ist genauso wichtig wie die Kontraktion.",
+  ];
+  const back = [
+    "💡 Nach Back Day: Schultermobilisation & Brustdehnung nicht vergessen.",
+    "🔙 Schulterblätter zusammenziehen beim Rudern – nicht die Arme.",
+    "🧲 Lat Pulldown: Ellenbogen nach unten und hinten, nicht nur nach unten ziehen.",
+  ];
+  const scoliosis = [
+    "⚡ Skoliose-Check: Neutrales Becken, keine Überstreckung im Hohlkreuz!",
+    "🏥 Hohlkreuz-Kontrolle: Bauch leicht anspannen bei allen stehenden Übungen.",
+    "🔄 Asymmetrie beachten: Beide Seiten gleichmäßig belasten.",
+  ];
+  const upper = [
+    "💪 Brust-Training: Schulterblätter zusammenziehen vor dem Drücken.",
+    "🎯 Trizeps: Ellenbogen nah am Körper halten für maximale Isolation.",
+    "🦾 Bizeps: Volle Streckung unten für maximale Muskelarbeit.",
+  ];
 
-function useLS(key, def) {
-  const [val, setVal] = useState(() => {
-    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : def; } catch { return def; }
-  });
-  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }, [key, val]);
-  return [val, setVal];
+  let tips = [...base];
+  if(profile.goal==="glute" || (profile.goal==="muscle" && sessions && Object.values(sessions).flat().some(s=>s.type==="Glute Day"))) tips.push(...glute);
+  if(sessions && Object.values(sessions).flat().some(s=>s.type==="Back Day")) tips.push(...back);
+  if(profile.hasScoliosis) tips.push(...scoliosis);
+  if(profile.goal==="upper") tips.push(...upper);
+  return tips;
 }
 
-function fs(extra={}) {
-  return { background:"#0f0f23", border:"1px solid #ffffff18", borderRadius:10, padding:"10px 12px", color:"#fff", fontFamily:"DM Sans", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box", ...extra };
+// ── Kalorien ──────────────────────────────────────────────────────────────────
+function calcGoals(p){
+  if(!p.weight||!p.height||!p.age) return {kcal:1700,protein:Math.round((p.weight||59)*1.8),carbs:170,fat:55};
+  const bmr=p.gender==="male"?10*p.weight+6.25*p.height-5*p.age+5:10*p.weight+6.25*p.height-5*p.age-161;
+  const f={low:1.375,medium:1.55,high:1.725};
+  const tdee=Math.round(bmr*(f[p.activity]||1.55));
+  const kcal=tdee-200;
+  const protein=Math.round(p.weight*1.8);
+  const fat=Math.round(p.weight*0.9);
+  const carbs=Math.round((kcal-protein*4-fat*9)/4);
+  return {kcal:Math.max(kcal,1400),protein,carbs:Math.max(carbs,100),fat};
 }
 
-function computeGoals(baseGoals, sessions, date) {
-  let extraKcal=0, extraCarbs=0;
-  (sessions[date]||[]).forEach(s => {
-    if(s.type==="Stepper") {
-      const m=Number(s.stepperMin)||10;
-      extraKcal+=Math.round(STEPPER_KCAL_PER_MIN*m);
-      extraCarbs+=Math.round(m*0.3);
+function getKcalPerMin(s){
+  if(s.cardioKcalPerMin) return s.cardioKcalPerMin;
+  if(s.type==="Stepper") return 5.5;
+  const c=CARDIO_LIST.find(x=>x.name===s.type);
+  if(c) return c.kcalPerMin;
+  const sp=SPORT_LIST.find(x=>x.name===s.type);
+  if(sp) return sp.kcalPerMin;
+  return 0;
+}
+
+function computeGoals(base,sessions,date){
+  let ek=0,ec=0;
+  (sessions[date]||[]).forEach(s=>{
+    const isCardioOrSport = s.sessionKind==="cardio"||s.sessionKind==="sport"||s.type==="Stepper";
+    if(isCardioOrSport){
+      const kpm=getKcalPerMin(s);
+      ek+=Math.round(kpm*(s.durationMin||10));
+      ec+=Math.round((s.durationMin||10)*0.3);
     } else {
-      const b=TRAINING_BURN[s.type]||TRAINING_BURN["Eigenes Training"];
-      extraKcal+=b.kcal; extraCarbs+=b.carbs;
+      const burn={
+        "Glute Day":{kcal:220,carbs:20},"Back Day":{kcal:200,carbs:18},
+        "Eigenes Training":{kcal:180,carbs:15}
+      };
+      const b=burn[s.type]||burn["Eigenes Training"];
+      ek+=b.kcal; ec+=b.carbs;
     }
   });
-  return { ...baseGoals, kcal:baseGoals.kcal+extraKcal, carbs:baseGoals.carbs+extraCarbs };
+  return {...base,kcal:base.kcal+ek,carbs:base.carbs+ec};
+}
+
+function analyzeDay({totals,goals,sessions,steps,profile}){
+  const stepKcal=Math.round(((steps||0)/1000)*STEPS_KCAL_PER_1000);
+  const deficit=goals.kcal-totals.kcal-stepKcal;
+  const surplus=-deficit;
+  const hasT=(sessions||[]).length>0;
+  const protOk=totals.protein/goals.protein>=0.8;
+  const goalLabel=profile?.goal==="glute"?"Gluteaufbau":profile?.goal==="upper"?"Oberkörperaufbau":"Muskelaufbau";
+
+  if(totals.kcal===0&&!hasT&&!steps) return {icon:"✨",color:"#ffffff44",title:"Noch nichts eingetragen",text:"Trag deine erste Mahlzeit oder dein Training ein – dann analysiere ich deinen Tag!",tip:null};
+  if(deficit>500) return {icon:"⚠️",color:"#f59e0b",title:"Starkes Kaloriendefizit",text:`Mit ${Math.round(totals.kcal)} kcal bei einem Ziel von ${goals.kcal} kcal bist du noch ${Math.round(deficit)} kcal im Minus. Bei solch einem Defizit riskierst du Muskelabbau – besonders an Trainingstagen. Iss noch etwas Proteinreiches!`,tip:"Griechischer Joghurt, Quark oder ein Proteinshake helfen schnell."};
+  if(deficit>200) return {icon:"🔥",color:"#ff6b9d",title:"Leichtes Defizit – ideal für Fettabbau",text:`Du bist ${Math.round(deficit)} kcal unter deinem Ziel – perfekter Sweet Spot für Fettabbau ohne Muskelverlust.${protOk?" Deine Proteinversorgung ist stark – deine Muskeln sind geschützt. 💪":" Achte noch auf genug Protein für deinen "+goalLabel+"."}${(steps||0)>=8000?` Deine ${(steps||0).toLocaleString("de-DE")} Schritte tragen zusätzlich bei.`:""}`,tip:hasT?"Training + leichtes Defizit = perfekte Kombination heute!":null};
+  if(surplus>0&&surplus<=400) return {icon:"💪",color:"#34d399",title:"Leichter Überschuss – "+goalLabel+" aktiv",text:`Mit ${Math.round(surplus)} kcal über deinem Ziel bist du im Aufbaubereich.${hasT?" Zusammen mit deinem Training hat dein Körper alles für "+goalLabel+" – perfekt!":" Training heute würde die Energie optimal nutzen."}`,tip:protOk?"Proteinzufuhr top – weiter so!":"Etwas mehr Protein würde den "+goalLabel+" maximieren."};
+  if(surplus>400) return {icon:"📈",color:"#a78bfa",title:"Deutlicher Überschuss",text:`Du bist ${Math.round(surplus)} kcal über deinem Tagesziel. Das fördert den Muskelaufbau, aber ein Teil wird als Fett gespeichert. Versuche morgen etwas ausgewogener zu essen.`,tip:null};
+  return {icon:"⚖️",color:"#ff6b9d",title:"Ausgeglichen – Körpererhalt",text:`Du bist nah an deinem Kalorienziel.${hasT?" Mit deinem heutigen Training baut dein Körper aktiv Muskeln auf!":" Training heute würde deinen "+goalLabel+" optimal unterstützen."}${protOk?" Deine Proteinversorgung ist stark.":" Mehr Protein würde deine Ergebnisse verbessern."}`,tip:null};
+}
+
+const r1=v=>Math.round(Number(v)*10)/10;
+function useLS(key,def){
+  const [val,setVal]=useState(()=>{try{const s=localStorage.getItem(key);return s?JSON.parse(s):def;}catch{return def;}});
+  useEffect(()=>{try{localStorage.setItem(key,JSON.stringify(val));}catch{}},[key,val]);
+  return [val,setVal];
+}
+function fs(extra={}){return{background:"#0f0f23",border:"1px solid #ffffff18",borderRadius:10,padding:"10px 12px",color:"#fff",fontFamily:"DM Sans",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",...extra};}
+
+// ── MacroRing ─────────────────────────────────────────────────────────────────
+function MacroRing({label,value,goal,color}){
+  const pct=Math.min(value/goal,1),r=30,cx=38,cy=38,circ=2*Math.PI*r;
+  return(<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+    <svg width="76" height="76" viewBox="0 0 76 76">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#ffffff10" strokeWidth="6"/>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="6"
+        strokeDasharray={`${pct*circ} ${circ}`} strokeDashoffset={circ*0.25} strokeLinecap="round"
+        style={{transition:"stroke-dasharray 0.7s ease",filter:`drop-shadow(0 0 5px ${color}99)`}}/>
+      <text x={cx} y={cy-4} textAnchor="middle" fill="#fff" fontSize="11" fontWeight="600" fontFamily="DM Sans">{r1(value)}</text>
+      <text x={cx} y={cy+9} textAnchor="middle" fill="#ffffff55" fontSize="8" fontFamily="DM Sans">/{goal}g</text>
+    </svg>
+    <span style={{fontSize:10,color:"#ffffff77",fontFamily:"DM Sans"}}>{label}</span>
+  </div>);
+}
+function KcalBar({value,goal,hasTraining}){
+  const pct=Math.min(value/goal,1);
+  return(<div style={{marginBottom:6}}>
+    <div style={{display:"flex",justifyContent:"space-between",marginBottom:7,alignItems:"baseline"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontFamily:"Playfair Display",fontSize:14,color:"#fff",fontStyle:"italic"}}>Kalorien</span>
+        {hasTraining&&<span style={{fontFamily:"DM Sans",fontSize:10,color:"#f59e0b",background:"#f59e0b22",borderRadius:99,padding:"2px 8px"}}>+Training</span>}
+      </div>
+      <span style={{fontFamily:"DM Sans",fontSize:13,color:"#ff6b9d",fontWeight:600}}>{r1(value)} <span style={{color:"#ffffff44",fontWeight:400}}>/ {goal} kcal</span></span>
+    </div>
+    <div style={{height:7,background:"#ffffff10",borderRadius:99,overflow:"hidden"}}>
+      <div style={{height:"100%",width:`${pct*100}%`,background:"linear-gradient(90deg,#ff6b9d,#ffb3d0)",borderRadius:99,transition:"width 0.7s ease",boxShadow:"0 0 8px #ff6b9d88"}}/>
+    </div>
+    <div style={{textAlign:"right",marginTop:4,fontSize:11,color:"#ffffff33",fontFamily:"DM Sans"}}>{Math.max(0,r1(goal-value))} kcal verbleibend</div>
+  </div>);
+}
+function DateNav({date,setDate}){
+  const isToday=date===todayDE();
+  return(<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+    <button onClick={()=>setDate(d=>addDays(d,-1))} style={{background:"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:"#fff",fontSize:18,cursor:"pointer"}}>&#8249;</button>
+    <div style={{flex:1,textAlign:"center"}}>
+      <div style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:"#fff"}}>{isToday?"Heute":fmtDate(date)}</div>
+      {!isToday&&<div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44"}}>{fmtDate(date)}</div>}
+    </div>
+    <button onClick={()=>setDate(d=>addDays(d,1))} disabled={isToday} style={{background:isToday?"#ffffff05":"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:isToday?"#ffffff22":"#fff",fontSize:18,cursor:isToday?"default":"pointer"}}>&#8250;</button>
+    {!isToday&&<button onClick={()=>setDate(todayDE())} style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
+  </div>);
+}
+
+// ── Schritte ──────────────────────────────────────────────────────────────────
+function StepsCard({steps,setSteps}){
+  const [editing,setEditing]=useState(false);
+  const [input,setInput]=useState("");
+  const goal=8000,pct=Math.min((steps||0)/goal,1),kcal=Math.round(((steps||0)/1000)*STEPS_KCAL_PER_1000);
+  function save(){setSteps(parseInt(input)||0);setEditing(false);}
+  return(<div style={{background:"#16213e",borderRadius:14,padding:"14px 16px",marginBottom:16,border:"1px solid #34d39922"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontSize:18}}>👟</span>
+        <span style={{fontFamily:"Playfair Display",fontSize:14,color:"#fff",fontStyle:"italic"}}>Schritte heute</span>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        {kcal>0&&<span style={{fontFamily:"DM Sans",fontSize:11,color:"#34d399"}}>-{kcal} kcal</span>}
+        <button onClick={()=>{setInput(String(steps||""));setEditing(true);}} style={{background:"#ffffff0f",border:"none",borderRadius:8,padding:"4px 10px",color:"#ffffff88",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>&#9998; Eintragen</button>
+      </div>
+    </div>
+    {editing?(<div style={{display:"flex",gap:8,marginBottom:8}}>
+      <input type="number" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&save()} placeholder="z.B. 8500" autoFocus style={fs({flex:1,padding:"8px 12px"})}/>
+      <button onClick={save} style={{background:"#34d399",border:"none",borderRadius:10,padding:"0 16px",color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:13,cursor:"pointer"}}>OK</button>
+      <button onClick={()=>setEditing(false)} style={{background:"#ffffff15",border:"none",borderRadius:10,padding:"0 12px",color:"#fff",fontFamily:"DM Sans",fontSize:13,cursor:"pointer"}}>&#10005;</button>
+    </div>):(
+      <div style={{fontFamily:"Playfair Display",fontSize:22,fontWeight:700,color:"#34d399",marginBottom:8}}>{(steps||0).toLocaleString("de-DE")} <span style={{fontSize:13,color:"#ffffff44",fontFamily:"DM Sans",fontWeight:400}}>/ {goal.toLocaleString("de-DE")} Schritte</span></div>
+    )}
+    <div style={{height:5,background:"#ffffff10",borderRadius:99,overflow:"hidden"}}>
+      <div style={{height:"100%",width:`${pct*100}%`,background:"linear-gradient(90deg,#34d399,#6ee7b7)",borderRadius:99,transition:"width 0.7s ease"}}/>
+    </div>
+    <div style={{marginTop:4,fontSize:11,color:"#ffffff33",fontFamily:"DM Sans",textAlign:"right"}}>{Math.max(0,goal-(steps||0)).toLocaleString("de-DE")} Schritte bis zum Ziel</div>
+  </div>);
 }
 
 // ── Tagesanalyse ──────────────────────────────────────────────────────────────
-function analyzDay({ totals, goals, sessions, steps, baseGoals }) {
-  const kcalPct = totals.kcal / goals.kcal;
-  const protPct = totals.protein / goals.protein;
-  const hasTraining = sessions.length > 0;
-  const stepKcal = Math.round((steps/1000)*STEPS_KCAL_PER_1000);
-  const deficit = goals.kcal - totals.kcal - stepKcal;
-  const surplus = -deficit;
-
-  let icon, color, title, text, tip;
-
-  if(totals.kcal === 0 && !hasTraining) {
-    return { icon:"✨", color:"#ffffff44", title:"Noch nichts eingetragen", text:"Trag deine erste Mahlzeit ein – ich analysiere dann deinen Tag für dich.", tip:null };
-  }
-
-  // Szenarien
-  if(deficit > 500) {
-    icon="⚠️"; color="#f59e0b";
-    title="Starkes Kaloriendefizit";
-    text=`Mit ${Math.round(totals.kcal)} kcal bei einem Ziel von ${goals.kcal} kcal bist du noch ${Math.round(deficit)} kcal im Minus. Bei solch einem Defizit riskierst du Muskelabbau statt Fettabbau – besonders wenn du heute trainiert hast. Iss noch etwas Proteinreiches!`;
-    tip="Griechischer Joghurt, Quark oder ein Proteinshake helfen schnell.";
-  } else if(deficit > 200) {
-    icon="🔥"; color="#ff6b9d";
-    title="Leichtes Defizit – ideal für Fettabbau";
-    text=`Du bist ${Math.round(deficit)} kcal unter deinem Ziel – das ist der Sweet Spot für leichten Fettabbau ohne Muskeln zu gefährden.${protPct >= 0.8 ? " Deine Proteinversorgung ist gut – deine Muskeln sind geschützt. 💪" : " Achte aber noch auf ausreichend Protein, um deine Muskeln zu schützen."}`;
-    tip= hasTraining ? "Training + leichtes Defizit = perfekte Kombination heute!" : null;
-  } else if(surplus > 200 && surplus < 500) {
-    icon="💪"; color="#34d399";
-    title="Leichter Überschuss – Muskelaufbau aktiv";
-    text=`Mit ${Math.round(surplus)} kcal über deinem Ziel bist du im Aufbaubereich.${hasTraining ? " Zusammen mit deinem heutigen Training ist das die perfekte Basis für Muskelwachstum! Dein Körper hat alles was er braucht." : " Wenn du heute noch trainierst, nutzt dein Körper diese Energie optimal für den Muskelaufbau."}`;
-    tip= protPct >= 0.9 ? "Proteinzufuhr top – weiter so!" : "Erhöhe noch etwas die Proteinzufuhr für maximalen Muskelaufbau.";
-  } else if(surplus >= 500) {
-    icon="📈"; color="#a78bfa";
-    title="Deutlicher Überschuss";
-    text=`Du bist ${Math.round(surplus)} kcal über deinem Tagesziel. Das fördert zwar den Muskelaufbau, aber ein Teil wird als Fett gespeichert. Da dein Ziel leichter Fettabbau ist, versuche morgen etwas ausgewogener zu essen.`;
-    tip=null;
-  } else {
-    // ausgeglichen
-    icon="⚖️"; color="#ff6b9d";
-    title="Ausgeglichen – Körpererhalt";
-    text=`Du bist nah an deinem Kalorienziel.${hasTraining ? " Mit deinem Training heute baut dein Körper aktiv Muskeln auf – sehr gut!" : " Falls du noch trainierst, unterstützt das deinen Muskelaufbau optimal."}${protPct >= 0.8 ? " Deine Proteinversorgung ist stark." : " Versuche noch mehr Protein zu essen für bessere Ergebnisse."}`;
-    tip=null;
-  }
-
-  // Schritte extra
-  if(steps >= 8000) {
-    text += ` Deine ${steps.toLocaleString("de-DE")} Schritte (+${stepKcal} kcal) tragen zusätzlich zum Fettabbau bei.`;
-  }
-
-  return { icon, color, title, text, tip };
+function DayAnalysisCard({totals,goals,sessions,steps,profile}){
+  const a=analyzeDay({totals,goals,sessions,steps,profile});
+  return(<div style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",borderRadius:16,padding:16,marginBottom:14,border:`1px solid ${a.color}33`}}>
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+      <span style={{fontSize:22}}>{a.icon}</span>
+      <div style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:a.color}}>{a.title}</div>
+    </div>
+    <div style={{fontFamily:"DM Sans",fontSize:13,color:"#ffffffbb",lineHeight:1.6}}>{a.text}</div>
+    {a.tip&&<div style={{marginTop:10,fontFamily:"DM Sans",fontSize:12,color:a.color,background:`${a.color}15`,borderRadius:8,padding:"8px 10px",fontStyle:"italic"}}>&#128161; {a.tip}</div>}
+  </div>);
 }
 
-// ── MacroRing ─────────────────────────────────────────────────────────────────
-function MacroRing({ label, value, goal, color }) {
-  const pct=Math.min(value/goal,1), r=30, cx=38, cy=38, circ=2*Math.PI*r;
-  return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
-      <svg width="76" height="76" viewBox="0 0 76 76">
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#ffffff10" strokeWidth="6"/>
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="6"
-          strokeDasharray={`${pct*circ} ${circ}`} strokeDashoffset={circ*0.25} strokeLinecap="round"
-          style={{transition:"stroke-dasharray 0.7s cubic-bezier(.4,0,.2,1)",filter:`drop-shadow(0 0 5px ${color}99)`}}/>
-        <text x={cx} y={cy-4} textAnchor="middle" fill="#fff" fontSize="11" fontWeight="600" fontFamily="DM Sans">{r1(value)}</text>
-        <text x={cx} y={cy+9} textAnchor="middle" fill="#ffffff55" fontSize="8" fontFamily="DM Sans">/{goal}g</text>
-      </svg>
-      <span style={{fontSize:10,color:"#ffffff77",fontFamily:"DM Sans"}}>{label}</span>
+// ── Mahlzeit Modal ────────────────────────────────────────────────────────────
+function AddMealModal({onAdd,onClose}){
+  const [name,setName]=useState("");const [type,setType]=useState("Snack");
+  const [kcal,setKcal]=useState("");const [protein,setProtein]=useState("");
+  const [carbs,setCarbs]=useState("");const [fat,setFat]=useState("");
+  function submit(){if(!name.trim()||!kcal)return;onAdd({id:Date.now(),name,type,kcal:Number(kcal),protein:Number(protein)||0,carbs:Number(carbs)||0,fat:Number(fat)||0});onClose();}
+  return(<div style={{position:"fixed",inset:0,background:"#000c",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+    <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>Mahlzeit eintragen</span>
+        <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+      </div>
+      <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff66",marginBottom:14,background:"#ff6b9d12",border:"1px solid #ff6b9d22",borderRadius:10,padding:"10px 12px"}}>
+        &#128172; Frag mich im Chat – ich rechne Nährwerte aus!
+      </div>
+      <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name (z.B. 1,5 Wiener Würstchen)" style={fs({marginBottom:10})}/>
+      <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+        {MEAL_TYPE_OPTIONS.map(t=>(<button key={t} onClick={()=>setType(t)} style={{flex:1,minWidth:70,background:type===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:8,padding:"8px 4px",color:type===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{t}</button>))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        {[["Kalorien (kcal) *",kcal,setKcal],["Protein (g)",protein,setProtein],["Kohlenhydrate (g)",carbs,setCarbs],["Fett (g)",fat,setFat]].map(([label,val,set])=>(
+          <div key={label}><div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44",marginBottom:4}}>{label}</div><input type="number" step="0.1" value={val} onChange={e=>set(e.target.value)} placeholder="0" style={fs({padding:"9px 12px"})}/></div>
+        ))}
+      </div>
+      <button onClick={submit} disabled={!name.trim()||!kcal} style={{width:"100%",background:name&&kcal?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff15",border:"none",borderRadius:14,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:name&&kcal?"pointer":"not-allowed"}}>Eintragen &#10022;</button>
     </div>
-  );
-}
-
-function KcalBar({ value, goal, hasTraining }) {
-  const pct=Math.min(value/goal,1);
-  return (
-    <div style={{marginBottom:6}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:7,alignItems:"baseline"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontFamily:"Playfair Display",fontSize:14,color:"#fff",fontStyle:"italic"}}>Kalorien</span>
-          {hasTraining&&<span style={{fontFamily:"DM Sans",fontSize:10,color:"#f59e0b",background:"#f59e0b22",borderRadius:99,padding:"2px 8px"}}>+Training</span>}
-        </div>
-        <span style={{fontFamily:"DM Sans",fontSize:13,color:"#ff6b9d",fontWeight:600}}>
-          {r1(value)} <span style={{color:"#ffffff44",fontWeight:400}}>/ {goal} kcal</span>
-        </span>
-      </div>
-      <div style={{height:7,background:"#ffffff10",borderRadius:99,overflow:"hidden"}}>
-        <div style={{height:"100%",width:`${pct*100}%`,background:"linear-gradient(90deg,#ff6b9d,#ffb3d0)",borderRadius:99,transition:"width 0.7s cubic-bezier(.4,0,.2,1)",boxShadow:"0 0 8px #ff6b9d88"}}/>
-      </div>
-      <div style={{textAlign:"right",marginTop:4,fontSize:11,color:"#ffffff33",fontFamily:"DM Sans"}}>
-        {Math.max(0,r1(goal-value))} kcal verbleibend
-      </div>
-    </div>
-  );
-}
-
-function DateNav({ date, setDate }) {
-  const isToday = date===todayDE();
-  return (
-    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-      <button onClick={()=>setDate(d=>addDays(d,-1))} style={{background:"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:"#fff",fontSize:18,cursor:"pointer"}}>&#8249;</button>
-      <div style={{flex:1,textAlign:"center"}}>
-        <div style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:"#fff"}}>{isToday?"Heute":fmtDate(date)}</div>
-        {!isToday&&<div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44"}}>{fmtDate(date)}</div>}
-      </div>
-      <button onClick={()=>setDate(d=>addDays(d,1))} disabled={isToday} style={{background:isToday?"#ffffff05":"#ffffff0f",border:"none",borderRadius:10,width:36,height:36,color:isToday?"#ffffff22":"#fff",fontSize:18,cursor:isToday?"default":"pointer"}}>&#8250;</button>
-      {!isToday&&<button onClick={()=>setDate(todayDE())} style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:10,padding:"0 10px",height:36,color:"#ff6b9d",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap"}}>Heute</button>}
-    </div>
-  );
-}
-
-// ── Tagesanalyse Karte ────────────────────────────────────────────────────────
-function DayAnalysisCard({ totals, goals, sessions, steps, baseGoals }) {
-  const a = analyzDay({ totals, goals, sessions, steps, baseGoals });
-  return (
-    <div style={{background:`linear-gradient(135deg,#16213e,#1a1a2e)`,borderRadius:16,padding:"16px",marginBottom:14,border:`1px solid ${a.color}33`,animation:"fadeIn 0.5s ease"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-        <span style={{fontSize:22}}>{a.icon}</span>
-        <div style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:a.color}}>{a.title}</div>
-      </div>
-      <div style={{fontFamily:"DM Sans",fontSize:13,color:"#ffffffbb",lineHeight:1.6}}>{a.text}</div>
-      {a.tip&&<div style={{marginTop:10,fontFamily:"DM Sans",fontSize:12,color:a.color,background:`${a.color}15`,borderRadius:8,padding:"8px 10px",fontStyle:"italic"}}>💡 {a.tip}</div>}
-    </div>
-  );
-}
-
-// ── Schritte Karte ────────────────────────────────────────────────────────────
-function StepsCard({ steps, setSteps }) {
-  const [editing, setEditing] = useState(false);
-  const [input, setInput] = useState(String(steps||""));
-  const goal = 8000;
-  const pct = Math.min((steps||0)/goal,1);
-  const kcal = Math.round(((steps||0)/1000)*STEPS_KCAL_PER_1000);
-
-  function save() {
-    const v = parseInt(input)||0;
-    setSteps(v);
-    setEditing(false);
-  }
-
-  return (
-    <div style={{background:"#16213e",borderRadius:14,padding:"14px 16px",marginBottom:14,border:"1px solid #ffffff0a"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:18}}>👟</span>
-          <span style={{fontFamily:"Playfair Display",fontSize:14,color:"#fff",fontStyle:"italic"}}>Schritte heute</span>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {kcal>0&&<span style={{fontFamily:"DM Sans",fontSize:11,color:"#34d399"}}>-{kcal} kcal</span>}
-          <button onClick={()=>{setInput(String(steps||""));setEditing(true);}} style={{background:"#ffffff0f",border:"none",borderRadius:8,padding:"4px 10px",color:"#ffffff88",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>✏️ Eintragen</button>
-        </div>
-      </div>
-      {editing?(
-        <div style={{display:"flex",gap:8,marginBottom:8}}>
-          <input type="number" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&save()}
-            placeholder="z.B. 8500" autoFocus style={{...fs({flex:1,padding:"8px 12px"})}}/>
-          <button onClick={save} style={{background:"#34d399",border:"none",borderRadius:10,padding:"0 16px",color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:13,cursor:"pointer"}}>OK</button>
-          <button onClick={()=>setEditing(false)} style={{background:"#ffffff15",border:"none",borderRadius:10,padding:"0 12px",color:"#fff",fontFamily:"DM Sans",fontSize:13,cursor:"pointer"}}>✕</button>
-        </div>
-      ):(
-        <div style={{fontFamily:"Playfair Display",fontSize:22,fontWeight:700,color:"#34d399",marginBottom:8}}>
-          {(steps||0).toLocaleString("de-DE")} <span style={{fontSize:13,color:"#ffffff44",fontFamily:"DM Sans",fontWeight:400}}>/ {goal.toLocaleString("de-DE")} Schritte</span>
-        </div>
-      )}
-      <div style={{height:5,background:"#ffffff10",borderRadius:99,overflow:"hidden"}}>
-        <div style={{height:"100%",width:`${pct*100}%`,background:"linear-gradient(90deg,#34d399,#6ee7b7)",borderRadius:99,transition:"width 0.7s cubic-bezier(.4,0,.2,1)",boxShadow:"0 0 8px #34d39988"}}/>
-      </div>
-      <div style={{marginTop:4,fontSize:11,color:"#ffffff33",fontFamily:"DM Sans",textAlign:"right"}}>
-        {Math.max(0,goal-(steps||0)).toLocaleString("de-DE")} Schritte bis zum Ziel
-      </div>
-    </div>
-  );
+  </div>);
 }
 
 // ── Profil Modal ──────────────────────────────────────────────────────────────
-function ProfileModal({ profiles, activeId, onSwitch, onSave, onDelete, onClose }) {
-  const [view, setView] = useState("list");
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name:"", weight:"", height:"", age:"", activity:"medium" });
+function ProfileModal({profiles,activeId,onSwitch,onSave,onDelete,onClose}){
+  const [view,setView]=useState("list");
+  const [editing,setEditing]=useState(null);
+  const [form,setForm]=useState({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female",hasScoliosis:false,goal:"muscle"});
+  const actLabels={low:"Wenig aktiv",medium:"Moderat",high:"Sehr aktiv"};
+  const goalLabels={glute:"Gluteaufbau",upper:"Oberkörper",muscle:"Allg. Muskelaufbau",fat:"Fettabbau"};
 
-  function startEdit(p) { setEditing(p.id); setForm({name:p.name,weight:p.weight,height:p.height,age:p.age,activity:p.activity||"medium",gender:p.gender||"female"}); setView("edit"); }
-  function startNew() { setEditing(null); setForm({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female"}); setView("new"); }
-  function save() {
-    if(!form.name.trim()) return;
-    onSave({id:editing||Date.now().toString(),name:form.name,weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity,gender:form.gender});
+  function startEdit(p){setEditing(p.id);setForm({name:p.name,weight:p.weight,height:p.height,age:p.age,activity:p.activity||"medium",gender:p.gender||"female",hasScoliosis:!!p.hasScoliosis,goal:p.goal||"muscle"});setView("edit");}
+  function startNew(){setEditing(null);setForm({name:"",weight:"",height:"",age:"",activity:"medium",gender:"female",hasScoliosis:false,goal:"muscle"});setView("new");}
+  function save(){
+    if(!form.name.trim())return;
+    onSave({id:editing||String(Date.now()),name:form.name,weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity,gender:form.gender,hasScoliosis:form.hasScoliosis,goal:form.goal});
     setView("list");
   }
-  const actLabels = {low:"Wenig aktiv",medium:"Moderat aktiv",high:"Sehr aktiv"};
 
-  if(view==="edit"||view==="new") return (
-    <div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+  if(view==="edit"||view==="new"){
+    const g=form.weight&&form.height&&form.age?calcGoals({weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity,gender:form.gender}):null;
+    return(<div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
       <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"92vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
           <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>{view==="new"?"Neues Profil":"Profil bearbeiten"}</span>
           <button onClick={()=>setView("list")} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
         </div>
+        {/* Geschlecht */}
         <div style={{marginBottom:14}}>
           <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Geschlecht</div>
           <div style={{display:"flex",gap:10}}>
             {[["female","&#9792; Weiblich"],["male","&#9794; Männlich"]].map(([val,label])=>(
-              <button key={val} onClick={()=>setForm(p=>({...p,gender:val}))} style={{flex:1,background:form.gender===val?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff0f",border:"none",borderRadius:12,padding:"12px",color:form.gender===val?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:13,fontWeight:form.gender===val?700:400,cursor:"pointer"}} dangerouslySetInnerHTML={{__html:label}}/>
+              <button key={val} onClick={()=>setForm(p=>({...p,gender:val}))} dangerouslySetInnerHTML={{__html:label}} style={{flex:1,background:form.gender===val?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff0f",border:"none",borderRadius:12,padding:"12px",color:form.gender===val?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:13,fontWeight:form.gender===val?700:400,cursor:"pointer"}}/>
             ))}
           </div>
         </div>
@@ -336,95 +353,67 @@ function ProfileModal({ profiles, activeId, onSwitch, onSave, onDelete, onClose 
             <input type={type} value={form[key]} onChange={e=>setForm(p=>({...p,[key]:e.target.value}))} placeholder={ph} style={fs()}/>
           </div>
         ))}
-        <div style={{marginBottom:16}}>
+        {/* Aktivität */}
+        <div style={{marginBottom:14}}>
           <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Aktivitätslevel</div>
           <div style={{display:"flex",gap:8}}>
-            {["low","medium","high"].map(a=>(
-              <button key={a} onClick={()=>setForm(p=>({...p,activity:a}))} style={{flex:1,background:form.activity===a?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:10,padding:"10px 4px",color:form.activity===a?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{actLabels[a]}</button>
-            ))}
+            {["low","medium","high"].map(a=>(<button key={a} onClick={()=>setForm(p=>({...p,activity:a}))} style={{flex:1,background:form.activity===a?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:10,padding:"10px 4px",color:form.activity===a?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{actLabels[a]}</button>))}
           </div>
         </div>
-        {form.weight&&form.height&&form.age&&(()=>{
-          const g=calcGoals({weight:Number(form.weight),height:Number(form.height),age:Number(form.age),activity:form.activity});
-          return (<div style={{background:"#ff6b9d15",border:"1px solid #ff6b9d33",borderRadius:12,padding:"12px 14px",marginBottom:16}}>
-            <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ff6b9d",fontWeight:600,marginBottom:6}}>Berechnete Tagesziele</div>
-            <div style={{display:"flex",gap:12,fontFamily:"DM Sans",fontSize:12,color:"#ffffff88",flexWrap:"wrap"}}>
-              <span>🔥 {g.kcal} kcal</span><span>💪 {g.protein}g P</span><span>🌾 {g.carbs}g KH</span><span>🥑 {g.fat}g F</span>
-            </div>
-          </div>);
-        })()}
-        <button onClick={save} disabled={!form.name.trim()} style={{width:"100%",background:form.name.trim()?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff15",border:"none",borderRadius:14,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:form.name.trim()?"pointer":"not-allowed"}}>Speichern ✦</button>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>Profile</span>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+        {/* Ziel */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginBottom:8}}>Trainingsziel</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {Object.entries(goalLabels).map(([val,label])=>(<button key={val} onClick={()=>setForm(p=>({...p,goal:val}))} style={{background:form.goal===val?"#a78bfa":"#ffffff0f",border:"none",borderRadius:10,padding:"10px 4px",color:form.goal===val?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{label}</button>))}
+          </div>
         </div>
-        {profiles.map(p=>{
-          const g=calcGoals(p); const isActive=p.id===activeId;
-          return (<div key={p.id} style={{background:isActive?"#ff6b9d18":"#16213e",border:`1px solid ${isActive?"#ff6b9d55":"#ffffff0a"}`,borderRadius:14,padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:12}}>
-            <div onClick={()=>{onSwitch(p.id);onClose();}} style={{flex:1,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
-              <div style={{width:38,height:38,borderRadius:"50%",background:isActive?"linear-gradient(135deg,#ff6b9d,#a78bfa)":"#ffffff15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff",fontFamily:"DM Sans",flexShrink:0}}>{p.gender==="male"?"♂":"♀"}</div>
-              <div>
-                <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{p.name} {isActive&&<span style={{color:"#ff6b9d",fontSize:11}}>&#10003; aktiv</span>}</div>
-                <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>{p.weight}kg · {p.age}J · {g.kcal} kcal</div>
-              </div>
+        {/* Skoliose */}
+        <div style={{marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,background:"#a78bfa15",border:"1px solid #a78bfa33",borderRadius:12,padding:"12px 14px",cursor:"pointer"}} onClick={()=>setForm(p=>({...p,hasScoliosis:!p.hasScoliosis}))}>
+            <div style={{width:22,height:22,borderRadius:6,border:`2px solid ${form.hasScoliosis?"#a78bfa":"#ffffff33"}`,background:form.hasScoliosis?"#a78bfa":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              {form.hasScoliosis&&<span style={{fontSize:14,color:"#fff"}}>&#10003;</span>}
             </div>
-            <button onClick={()=>startEdit(p)} style={{background:"#ffffff0f",border:"none",borderRadius:8,padding:"6px 10px",color:"#ffffff88",fontSize:14,cursor:"pointer"}}>&#9998;</button>
-            {profiles.length>1&&<button onClick={()=>onDelete(p.id)} style={{background:"#ff6b9d15",border:"none",borderRadius:8,padding:"6px 10px",color:"#ff6b9d",fontSize:14,cursor:"pointer"}}>&#128465;</button>}
-          </div>);
-        })}
-        <button onClick={startNew} style={{width:"100%",background:"#34d39915",border:"1px dashed #34d39944",borderRadius:14,padding:14,color:"#34d399",fontFamily:"DM Sans",fontWeight:600,fontSize:13,cursor:"pointer",marginTop:4}}>+ Neues Profil erstellen</button>
+            <div><div style={{fontFamily:"DM Sans",fontWeight:600,color:"#a78bfa",fontSize:13}}>&#127973; Skoliose / Hohlkreuz</div><div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55",marginTop:2}}>Aktiviert spezielle Form-Erinnerungen</div></div>
+          </div>
+        </div>
+        {g&&(<div style={{background:"#ff6b9d15",border:"1px solid #ff6b9d33",borderRadius:12,padding:"12px 14px",marginBottom:16}}>
+          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ff6b9d",fontWeight:600,marginBottom:6}}>Berechnete Tagesziele</div>
+          <div style={{display:"flex",gap:12,fontFamily:"DM Sans",fontSize:12,color:"#ffffff88",flexWrap:"wrap"}}>
+            <span>&#128293; {g.kcal} kcal</span><span>&#128170; {g.protein}g P</span><span>&#127807; {g.carbs}g KH</span><span>&#129361; {g.fat}g F</span>
+          </div>
+        </div>)}
+        <button onClick={save} disabled={!form.name.trim()} style={{width:"100%",background:form.name.trim()?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff15",border:"none",borderRadius:14,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:form.name.trim()?"pointer":"not-allowed"}}>Speichern &#10022;</button>
       </div>
-    </div>
-  );
-}
-
-// ── AddMealModal ──────────────────────────────────────────────────────────────
-function AddMealModal({ onAdd, onClose }) {
-  const [name,setName]=useState(""); const [type,setType]=useState("Snack");
-  const [kcal,setKcal]=useState(""); const [protein,setProtein]=useState("");
-  const [carbs,setCarbs]=useState(""); const [fat,setFat]=useState("");
-  function submit() {
-    if(!name.trim()||!kcal) return;
-    onAdd({id:Date.now(),name,type,kcal:Number(kcal),protein:Number(protein)||0,carbs:Number(carbs)||0,fat:Number(fat)||0});
-    onClose();
+    </div>);
   }
-  return (
-    <div style={{position:"fixed",inset:0,background:"#000c",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-          <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>Mahlzeit eintragen</span>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer",padding:"0 4px"}}>&#10005;</button>
-        </div>
-        <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff66",marginBottom:14,background:"#ff6b9d12",border:"1px solid #ff6b9d22",borderRadius:10,padding:"10px 12px"}}>
-          💬 Frag mich im Chat welche Nährwerte deine Mahlzeit hat – ich rechne es aus!
-        </div>
-        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name (z.B. 1,5 Wiener Würstchen)" style={fs({marginBottom:10})}/>
-        <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
-          {MEAL_TYPE_OPTIONS.map(t=>(<button key={t} onClick={()=>setType(t)} style={{flex:1,minWidth:70,background:type===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:8,padding:"8px 4px",color:type===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer"}}>{t}</button>))}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-          {[["Kalorien (kcal) *",kcal,setKcal],["Protein (g)",protein,setProtein],["Kohlenhydrate (g)",carbs,setCarbs],["Fett (g)",fat,setFat]].map(([label,val,set])=>(
-            <div key={label}>
-              <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44",marginBottom:4}}>{label}</div>
-              <input type="number" step="0.1" value={val} onChange={e=>set(e.target.value)} placeholder="0" style={fs({padding:"9px 12px"})}/>
-            </div>
-          ))}
-        </div>
-        <button onClick={submit} disabled={!name.trim()||!kcal} style={{width:"100%",background:name&&kcal?"linear-gradient(135deg,#ff6b9d,#e05588)":"#ffffff15",border:"none",borderRadius:14,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:name&&kcal?"pointer":"not-allowed",boxShadow:name&&kcal?"0 6px 20px #ff6b9d44":"none"}}>Eintragen ✦</button>
+
+  return(<div style={{position:"fixed",inset:0,background:"#000c",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+    <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>Profile</span>
+        <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
       </div>
+      {profiles.map(p=>{
+        const g=calcGoals(p),isActive=p.id===activeId;
+        return(<div key={p.id} style={{background:isActive?"#ff6b9d18":"#16213e",border:`1px solid ${isActive?"#ff6b9d55":"#ffffff0a"}`,borderRadius:14,padding:"14px 16px",marginBottom:10,display:"flex",alignItems:"center",gap:12}}>
+          <div onClick={()=>{onSwitch(p.id);onClose();}} style={{flex:1,cursor:"pointer",display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:38,height:38,borderRadius:"50%",background:isActive?"linear-gradient(135deg,#ff6b9d,#a78bfa)":"#ffffff15",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,color:"#fff",flexShrink:0}}>{p.gender==="male"?"&#9794;":"&#9792;"}</div>
+            <div>
+              <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{p.name} {isActive&&<span style={{color:"#ff6b9d",fontSize:11}}>&#10003; aktiv</span>}</div>
+              <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>{p.weight}kg · {p.age}J · {g.kcal} kcal{p.hasScoliosis?" · &#127973;":""}</div>
+            </div>
+          </div>
+          <button onClick={()=>startEdit(p)} style={{background:"#ffffff0f",border:"none",borderRadius:8,padding:"6px 10px",color:"#ffffff88",fontSize:14,cursor:"pointer"}}>&#9998;</button>
+          {profiles.length>1&&<button onClick={()=>onDelete(p.id)} style={{background:"#ff6b9d15",border:"none",borderRadius:8,padding:"6px 10px",color:"#ff6b9d",fontSize:14,cursor:"pointer"}}>&#128465;</button>}
+        </div>);
+      })}
+      <button onClick={startNew} style={{width:"100%",background:"#34d39915",border:"1px dashed #34d39944",borderRadius:14,padding:14,color:"#34d399",fontFamily:"DM Sans",fontWeight:600,fontSize:13,cursor:"pointer",marginTop:4}}>+ Neues Profil erstellen</button>
     </div>
-  );
+  </div>);
 }
 
-// ── NutritionTab ──────────────────────────────────────────────────────────────
-function NutritionTab({ allMeals, setAllMeals, allSessions, allSteps, setAllSteps, date, setDate, baseGoals }) {
+// ── Ernährung Tab ─────────────────────────────────────────────────────────────
+function NutritionTab({allMeals,setAllMeals,allSessions,allSteps,setAllSteps,date,setDate,baseGoals,profile}){
   const [showModal,setShowModal]=useState(false);
   const [filter,setFilter]=useState("Alle");
   const meals=allMeals[date]||[];
@@ -433,296 +422,331 @@ function NutritionTab({ allMeals, setAllMeals, allSessions, allSteps, setAllStep
   const goals=computeGoals(baseGoals,allSessions,date);
   const hasTraining=sessions.length>0;
   const totals=meals.reduce((a,m)=>({kcal:a.kcal+m.kcal,protein:a.protein+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat}),{kcal:0,protein:0,carbs:0,fat:0});
-  const proteinPct=totals.protein/goals.protein;
   const filtered=filter==="Alle"?meals:meals.filter(m=>m.type===filter);
   function addMeal(meal){setAllMeals(prev=>({...prev,[date]:[meal,...(prev[date]||[])]}));}
   function removeMeal(id){setAllMeals(prev=>({...prev,[date]:(prev[date]||[]).filter(m=>m.id!==id)}));}
   function setSteps(v){setAllSteps(prev=>({...prev,[date]:v}));}
 
-  return (
-    <div style={{paddingBottom:24}}>
-      <DateNav date={date} setDate={setDate}/>
-      {/* Macro Dashboard */}
-      <div style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",borderRadius:20,padding:18,marginBottom:14,border:"1px solid #ffffff0e"}}>
-        <KcalBar value={totals.kcal} goal={goals.kcal} hasTraining={hasTraining}/>
-        {hasTraining&&(<div style={{fontFamily:"DM Sans",fontSize:11,color:"#f59e0b",marginBottom:10,textAlign:"center"}}>
-          🏋️ +{goals.kcal-baseGoals.kcal} kcal · +{goals.carbs-baseGoals.carbs}g KH durch Training
-        </div>)}
-        <div style={{display:"flex",justifyContent:"space-around",marginTop:14}}>
-          <MacroRing label="Protein" value={totals.protein} goal={goals.protein} color="#ff6b9d"/>
-          <MacroRing label="Kohlenhydrate" value={totals.carbs} goal={goals.carbs} color="#a78bfa"/>
-          <MacroRing label="Fett" value={totals.fat} goal={goals.fat} color="#34d399"/>
-        </div>
+  return(<div style={{paddingBottom:24}}>
+    <DateNav date={date} setDate={setDate}/>
+    <div style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",borderRadius:20,padding:18,marginBottom:14,border:"1px solid #ffffff0e"}}>
+      <KcalBar value={totals.kcal} goal={goals.kcal} hasTraining={hasTraining}/>
+      {hasTraining&&<div style={{fontFamily:"DM Sans",fontSize:11,color:"#f59e0b",marginBottom:10,textAlign:"center"}}>&#127947; +{goals.kcal-baseGoals.kcal} kcal durch Training</div>}
+      <div style={{display:"flex",justifyContent:"space-around",marginTop:14}}>
+        <MacroRing label="Protein" value={totals.protein} goal={goals.protein} color="#ff6b9d"/>
+        <MacroRing label="Kohlenhydrate" value={totals.carbs} goal={goals.carbs} color="#a78bfa"/>
+        <MacroRing label="Fett" value={totals.fat} goal={goals.fat} color="#34d399"/>
       </div>
-
-      {/* Tagesanalyse */}
-      <DayAnalysisCard totals={totals} goals={goals} sessions={sessions} steps={steps} baseGoals={baseGoals}/>
-
-      {/* Training badges */}
-      {sessions.length>0&&(<div style={{marginBottom:14}}>
-        {sessions.map(s=>(<div key={s.id} style={{background:"#16213e",borderRadius:12,padding:"10px 14px",marginBottom:8,border:"1px solid #f59e0b33",display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontSize:16}}>{s.type==="Glute Day"?"🍑":s.type==="Back Day"?"💪":s.type==="Stepper"?"🚶‍♀️":"🏋️"}</span>
-          <div style={{flex:1}}>
-            <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#f59e0b",fontSize:13}}>{s.type}{s.stepperMin?` · ${s.stepperMin} min`:""}</div>
-            <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>+{s.type==="Stepper"?Math.round((s.stepperMin||10)*STEPPER_KCAL_PER_MIN):(TRAINING_BURN[s.type]||TRAINING_BURN["Eigenes Training"]).kcal} kcal Mehrbedarf</div>
+    </div>
+    <DayAnalysisCard totals={totals} goals={goals} sessions={sessions} steps={steps} profile={profile}/>
+    {sessions.length>0&&(<div style={{marginBottom:14}}>{sessions.map(s=>{
+      const isCardioSport=s.sessionKind==="cardio"||s.sessionKind==="sport";
+      const kpm=getKcalPerMin(s);
+      const burnKcal=isCardioSport?Math.round(kpm*(s.durationMin||10)):(({
+        "Glute Day":220,"Back Day":200
+      })[s.type]||180);
+      const ic=s.sessionKind==="cardio"?"&#128035;":s.sessionKind==="sport"?"&#127942;":s.type==="Glute Day"?"&#127821;":s.type==="Back Day"?"&#128170;":"&#127947;";
+      return(<div key={s.id} style={{background:"#16213e",borderRadius:12,padding:"10px 14px",marginBottom:8,border:"1px solid #f59e0b33",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:16}} dangerouslySetInnerHTML={{__html:ic}}/>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#f59e0b",fontSize:13}}>{s.type}{s.durationMin?` · ${s.durationMin} min`:""}</div>
+          <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>+{burnKcal} kcal Mehrbedarf</div>
+        </div>
+      </div>);
+    })}</div>)}
+    {totals.protein/goals.protein<0.5&&meals.length>0&&(<div style={{background:"#ff6b9d18",border:"1px solid #ff6b9d55",borderRadius:14,padding:"11px 14px",marginBottom:14,display:"flex",gap:10,alignItems:"center"}}>
+      <span style={{fontSize:18}}>&#9888;</span>
+      <div><div style={{fontFamily:"DM Sans",fontWeight:600,color:"#ff6b9d",fontSize:13}}>Protein-Ziel weit entfernt</div><div style={{fontFamily:"DM Sans",color:"#ffffff77",fontSize:12,marginTop:1}}>Nur {Math.round(totals.protein/goals.protein*100)}% – mehr Protein für deinen Muskelaufbau!</div></div>
+    </div>)}
+    <button onClick={()=>setShowModal(true)} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 18px #ff6b9d44",marginBottom:14}}>+ Mahlzeit eintragen</button>
+    {meals.length>0&&(<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:12}}>
+      {["Alle",...MEAL_TYPE_OPTIONS].map(t=>(<button key={t} onClick={()=>setFilter(t)} style={{background:filter===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:99,padding:"5px 13px",color:filter===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{t}</button>))}
+    </div>)}
+    {filtered.length===0?(<div style={{textAlign:"center",color:"#ffffff22",fontFamily:"DM Sans",fontSize:14,padding:"36px 0"}}>{meals.length===0?"Noch nichts eingetragen &#10024;":"Keine Mahlzeiten hier"}</div>):(
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        {filtered.map(meal=>(<div key={meal.id} style={{background:"#16213e",borderRadius:13,padding:"13px 15px",border:"1px solid #ffffff09",position:"relative"}}>
+          <button onClick={()=>removeMeal(meal.id)} style={{position:"absolute",top:10,right:11,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer"}}>&#10005;</button>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:7,paddingRight:20}}>
+            <div><div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{meal.name}</div><div style={{fontFamily:"DM Sans",fontSize:11,color:"#ff6b9d",marginTop:1}}>{meal.type}</div></div>
+            <div style={{fontFamily:"Playfair Display",fontSize:17,color:"#ff6b9d",fontWeight:700,flexShrink:0}}>{r1(meal.kcal)} <span style={{fontSize:10,color:"#ffffff44",fontFamily:"DM Sans",fontWeight:400}}>kcal</span></div>
+          </div>
+          <div style={{display:"flex",gap:12}}>
+            {[["P",meal.protein,"#ff6b9d"],["KH",meal.carbs,"#a78bfa"],["F",meal.fat,"#34d399"]].map(([l,v,c])=>(<div key={l} style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:5,height:5,borderRadius:"50%",background:c,display:"inline-block"}}/><span style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}>{l} {r1(v)}g</span></div>))}
           </div>
         </div>))}
-      </div>)}
-
-      {/* Protein reminder */}
-      {proteinPct<0.5&&meals.length>0&&(<div style={{background:"#ff6b9d18",border:"1px solid #ff6b9d55",borderRadius:14,padding:"11px 14px",marginBottom:14,display:"flex",gap:10,alignItems:"center"}}>
-        <span style={{fontSize:18}}>⚠️</span>
-        <div>
-          <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#ff6b9d",fontSize:13}}>Protein-Ziel weit entfernt</div>
-          <div style={{fontFamily:"DM Sans",color:"#ffffff77",fontSize:12,marginTop:1}}>Nur {Math.round(proteinPct*100)}% – mehr Protein für deinen Gluteaufbau!</div>
-        </div>
-      </div>)}
-
-      <button onClick={()=>setShowModal(true)} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:14,padding:"13px",color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 18px #ff6b9d44",marginBottom:14}}>
-        + Mahlzeit eintragen
-      </button>
-
-      {meals.length>0&&(<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginBottom:12}}>
-        {["Alle",...MEAL_TYPE_OPTIONS].map(t=>(<button key={t} onClick={()=>setFilter(t)} style={{background:filter===t?"#ff6b9d":"#ffffff0f",border:"none",borderRadius:99,padding:"5px 13px",color:filter===t?"#fff":"#ffffff66",fontFamily:"DM Sans",fontSize:11,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>{t}</button>))}
-      </div>)}
-
-      {filtered.length===0?(
-        <div style={{textAlign:"center",color:"#ffffff22",fontFamily:"DM Sans",fontSize:14,padding:"36px 0"}}>{meals.length===0?"Noch nichts eingetragen ✨":"Keine Mahlzeiten in dieser Kategorie"}</div>
-      ):(
-        <div style={{display:"flex",flexDirection:"column",gap:9}}>
-          {filtered.map(meal=>(<div key={meal.id} style={{background:"#16213e",borderRadius:13,padding:"13px 15px",border:"1px solid #ffffff09",animation:"fadeIn 0.3s ease",position:"relative"}}>
-            <button onClick={()=>removeMeal(meal.id)} style={{position:"absolute",top:10,right:11,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer",padding:"0 2px"}}>&#10005;</button>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:7,paddingRight:20}}>
-              <div>
-                <div style={{fontFamily:"DM Sans",fontWeight:600,color:"#fff",fontSize:14}}>{meal.name}</div>
-                <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ff6b9d",marginTop:1}}>{meal.type}</div>
-              </div>
-              <div style={{fontFamily:"Playfair Display",fontSize:17,color:"#ff6b9d",fontWeight:700,flexShrink:0}}>{r1(meal.kcal)} <span style={{fontSize:10,color:"#ffffff44",fontFamily:"DM Sans",fontWeight:400}}>kcal</span></div>
-            </div>
-            <div style={{display:"flex",gap:12}}>
-              {[["P",meal.protein,"#ff6b9d"],["KH",meal.carbs,"#a78bfa"],["F",meal.fat,"#34d399"]].map(([l,v,c])=>(<div key={l} style={{display:"flex",alignItems:"center",gap:4}}><span style={{width:5,height:5,borderRadius:"50%",background:c,display:"inline-block"}}/><span style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}>{l} {r1(v)}g</span></div>))}
-            </div>
-          </div>))}
-        </div>
-      )}
-      {showModal&&<AddMealModal onAdd={addMeal} onClose={()=>setShowModal(false)}/>}
-    </div>
-  );
+      </div>
+    )}
+    {showModal&&<AddMealModal onAdd={addMeal} onClose={()=>setShowModal(false)}/>}
+  </div>);
 }
 
-// ── ExerciseRow ───────────────────────────────────────────────────────────────
-function ExerciseRow({ ex, onToggle, onRemove, onChange }) {
-  return (
-    <div style={{background:"#16213e",borderRadius:12,padding:"11px 13px",marginBottom:9,border:ex.done?"1px solid #ff6b9d55":"1px solid #ffffff09"}}>
-      <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
-        <div onClick={onToggle} style={{width:24,height:24,borderRadius:"50%",border:`2px solid ${ex.done?"#ff6b9d":"#ffffff33"}`,background:ex.done?"#ff6b9d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
-          {ex.done&&<span style={{fontSize:12,color:"#fff"}}>&#10003;</span>}
-        </div>
-        <span style={{fontFamily:"DM Sans",fontWeight:600,color:ex.done?"#ffffff55":"#fff",fontSize:13,flex:1,textDecoration:ex.done?"line-through":"none"}}>{ex.name}</span>
-        <button onClick={onRemove} style={{background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer",padding:"0 2px"}}>&#128465;</button>
+// ── Übung Row ─────────────────────────────────────────────────────────────────
+function ExerciseRow({ex,onToggle,onRemove,onChange}){
+  return(<div style={{background:"#16213e",borderRadius:12,padding:"11px 13px",marginBottom:9,border:ex.done?"1px solid #ff6b9d55":"1px solid #ffffff09"}}>
+    <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:9}}>
+      <div onClick={onToggle} style={{width:24,height:24,borderRadius:"50%",border:`2px solid ${ex.done?"#ff6b9d":"#ffffff33"}`,background:ex.done?"#ff6b9d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+        {ex.done&&<span style={{fontSize:12,color:"#fff"}}>&#10003;</span>}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
-        {[["kg","weightStr","number","0.5"],["Sätze","sets","number","1"],["Wdh.","reps","text",""]].map(([label,key,type,step])=>(
-          <div key={key}>
-            <div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff33",marginBottom:3}}>{label}</div>
-            <input type={type} step={step||undefined} value={ex[key]} onChange={e=>onChange(ex.id,key,e.target.value)} placeholder={label} style={fs({padding:"7px 9px",fontSize:12})}/>
-          </div>
-        ))}
-      </div>
+      <span style={{fontFamily:"DM Sans",fontWeight:600,color:ex.done?"#ffffff55":"#fff",fontSize:13,flex:1,textDecoration:ex.done?"line-through":"none"}}>{ex.name}</span>
+      <button onClick={onRemove} style={{background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer"}}>&#128465;</button>
     </div>
-  );
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
+      {[["kg","weightStr","number","0.5"],["Sätze","sets","number","1"],["Wdh.","reps","text",""]].map(([label,key,type,step])=>(
+        <div key={key}><div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff33",marginBottom:3}}>{label}</div><input type={type} step={step||undefined} value={ex[key]} onChange={e=>onChange(ex.id,key,e.target.value)} placeholder={label} style={fs({padding:"7px 9px",fontSize:12})}/></div>
+      ))}
+    </div>
+  </div>);
 }
 
-// ── TrainingTab ───────────────────────────────────────────────────────────────
-function TrainingTab({ allSessions, setAllSessions, allSteps, setAllSteps, userTemplates, setUserTemplates, date, setDate }) {
-  const steps = allSteps[date]||0;
+// ── Dauer Modal (Cardio / Sport) ──────────────────────────────────────────────
+function DurationModal({title,icon,color,durationMin,setDurationMin,onSave,onClose}){
+  return(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+    <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:18}}>
+        <span style={{fontFamily:"Playfair Display",fontSize:19,fontWeight:700,color:"#fff"}}>{icon} {title}</span>
+        <button onClick={onClose} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
+        <button onClick={()=>setDurationMin(m=>Math.max(1,m-5))} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>&#8722;</button>
+        <div style={{flex:1,textAlign:"center"}}>
+          <input type="number" min="1" value={durationMin} onChange={e=>setDurationMin(Math.max(1,Number(e.target.value)))} style={{background:"transparent",border:"none",textAlign:"center",fontSize:42,fontWeight:700,color:color,fontFamily:"Playfair Display",outline:"none",width:"120px"}}/>
+          <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff44"}}>Minuten</div>
+        </div>
+        <button onClick={()=>setDurationMin(m=>m+5)} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>+</button>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+        {[5,10,15,20,30,45,60,90].map(m=>(<button key={m} onClick={()=>setDurationMin(m)} style={{background:durationMin===m?color:"#ffffff0f",border:"none",borderRadius:99,padding:"6px 14px",color:durationMin===m?"#000":"#ffffff66",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",fontWeight:durationMin===m?700:400}}>{m} min</button>))}
+      </div>
+      <button onClick={onSave} style={{width:"100%",background:`linear-gradient(135deg,${color},${color}cc)`,border:"none",borderRadius:13,padding:15,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer"}}>Speichern &#10024;</button>
+    </div>
+  </div>);
+}
+
+// ── Training Tab ──────────────────────────────────────────────────────────────
+function TrainingTab({allSessions,setAllSessions,allSteps,setAllSteps,userTemplates,setUserTemplates,profile,allProfileSessions,date,setDate}){
+  const steps=allSteps[date]||0;
   function setSteps(v){setAllSteps(prev=>({...prev,[date]:v}));}
-  const [modal,setModal]=useState(null);
+  const sessions=allSessions[date]||[];
+  const tips=getTrainerTips(profile,allProfileSessions);
+
+  // Modal states
+  const [modal,setModal]=useState(null); // null | "kind" | "training" | "cardio" | "sport" | "duration-cardio" | "duration-sport"
   const [exercises,setExercises]=useState([]);
   const [note,setNote]=useState("");
   const [customName,setCustomName]=useState("");
-  const [stepperMin,setStepperMin]=useState(10);
   const [showAddEx,setShowAddEx]=useState(false);
   const [newEx,setNewEx]=useState({name:"",weightStr:"",sets:"3",reps:"10"});
-  const [confirmDelete,setConfirmDelete]=useState(null); // {type:"template"|"session", id, name}
-  const sessions=allSessions[date]||[];
+  const [selectedCardio,setSelectedCardio]=useState(null);
+  const [selectedSport,setSelectedSport]=useState(null);
+  const [durationMin,setDurationMin]=useState(20);
+  const [activeTemplate,setActiveTemplate]=useState(null); // which template key is open
+  const [confirmDelete,setConfirmDelete]=useState(null);
 
-  // Standard-Trainings
-  const FIXED_TYPES = ["Glute Day","Back Day","Stepper"];
-  // Alle gespeicherten eigenen Trainings (Vorlagen)
-  const customTemplateKeys = Object.keys(userTemplates).filter(k=>!FIXED_TYPES.includes(k));
+  const FIXED_TYPES=["Glute Day","Back Day"];
+  const customTemplateKeys=Object.keys(userTemplates).filter(k=>!FIXED_TYPES.includes(k));
 
-  // Vorlage holen: gespeicherte Version oder Standard
-  function getTemplate(type){
-    return userTemplates[type] || DEFAULT_TEMPLATES[type] || [];
-  }
-  // Vorlage dauerhaft speichern
-  function saveTemplate(type, exs){
-    if(type==="Stepper") return;
-    setUserTemplates(prev=>({...prev,[type]:exs.map(e=>({...e,done:false}))}));
-  }
-  // Vorlage löschen (mit Rückfrage)
-  function deleteTemplate(type){
-    setUserTemplates(prev=>{const n={...prev};delete n[type];return n;});
-    setConfirmDelete(null);
-  }
+  function getTemplate(type){return userTemplates[type]||DEFAULT_TEMPLATES[type]||[];}
+  function saveTemplate(type,exs){setUserTemplates(prev=>({...prev,[type]:exs.map(e=>({...e,done:false}))}));}
+  function deleteTemplate(name){setUserTemplates(prev=>{const n={...prev};delete n[name];return n;});setConfirmDelete(null);}
 
-  function openTemplate(type){setExercises(getTemplate(type).map((e,i)=>({...e,id:e.id||i,done:false})));setNote("");setShowAddEx(false);setModal(type);}
+  function openTrainingTemplate(type){
+    setExercises(getTemplate(type).map((e,i)=>({...e,id:e.id||i,done:false})));
+    setNote("");setShowAddEx(false);setActiveTemplate(type);setModal("training");
+  }
   function updateEx(id,key,val){setExercises(prev=>prev.map(e=>e.id===id?{...e,[key]:val}:e));}
   function toggleEx(id){setExercises(prev=>prev.map(e=>e.id===id?{...e,done:!e.done}:e));}
   function removeEx(id){setExercises(prev=>prev.filter(e=>e.id!==id));}
-  function addExercise(){
-    if(!newEx.name.trim())return;
-    setExercises(prev=>[...prev,{...newEx,id:Date.now(),done:false}]);
-    setNewEx({name:"",weightStr:"",sets:"3",reps:"10"});setShowAddEx(false);
+  function addExercise(){if(!newEx.name.trim())return;setExercises(prev=>[...prev,{...newEx,id:Date.now(),done:false}]);setNewEx({name:"",weightStr:"",sets:"3",reps:"10"});setShowAddEx(false);}
+
+  function saveTrainingSession(){
+    const name=activeTemplate==="custom"?(customName||"Eigenes Training"):activeTemplate;
+    const tip=tips[Math.floor(Math.random()*tips.length)];
+    saveTemplate(name,exercises);
+    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:name,exercises:[...exercises],note,tip,sessionKind:"training"}]}));
+    setModal(null);setActiveTemplate(null);
   }
-  function saveSession(){
-    const tip=TRAINER_TIPS[Math.floor(Math.random()*TRAINER_TIPS.length)];
-    const name=modal==="custom"?(customName||"Eigenes Training"):modal;
-    saveTemplate(name, exercises);
-    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:name,exercises:[...exercises],note,tip}]}));
-    setModal(null);
+  function saveCardioSession(){
+    const tip=tips[Math.floor(Math.random()*tips.length)];
+    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:selectedCardio.name,durationMin,cardioKcalPerMin:selectedCardio.kcalPerMin,tip,sessionKind:"cardio"}]}));
+    setModal(null);setSelectedCardio(null);
   }
-  function saveStepper(){
-    const tip=TRAINER_TIPS[Math.floor(Math.random()*TRAINER_TIPS.length)];
-    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:"Stepper",stepperMin,exercises:[{id:0,name:`Stepper ${stepperMin} min`,weightStr:"",sets:"1",reps:`${stepperMin} Min`,done:true}],note:"",tip}]}));
-    setModal(null);
+  function saveSportSession(){
+    const tip=tips[Math.floor(Math.random()*tips.length)];
+    setAllSessions(prev=>({...prev,[date]:[...(prev[date]||[]),{id:Date.now(),type:selectedSport.name,durationMin,cardioKcalPerMin:selectedSport.kcalPerMin,tip,sessionKind:"sport"}]}));
+    setModal(null);setSelectedSport(null);
   }
   function removeSession(id){setAllSessions(prev=>({...prev,[date]:(prev[date]||[]).filter(s=>s.id!==id)}));}
-  const icon=t=>({["Glute Day"]:"🍑",["Back Day"]:"💪",["Stepper"]:"🚶‍♀️"}[t]||"🏋️");
+  function sessionIcon(s){
+    if(s.sessionKind==="cardio"){const c=CARDIO_LIST.find(x=>x.name===s.type);return c?c.icon:"&#128035;";}
+    if(s.sessionKind==="sport"){const sp=SPORT_LIST.find(x=>x.name===s.type);return sp?sp.icon:"&#127942;";}
+    return {["Glute Day"]:"&#127821;",["Back Day"]:"&#128170;"}[s.type]||"&#127947;";
+  }
 
-  return (
-    <div style={{paddingBottom:24}}>
-      <DateNav date={date} setDate={setDate}/>
-      <StepsCard steps={steps} setSteps={setSteps}/>
-      <div style={{background:"#a78bfa18",border:"1px solid #a78bfa44",borderRadius:13,padding:"11px 14px",marginBottom:18,display:"flex",gap:9,alignItems:"center"}}>
-        <span style={{fontSize:16}}>🏥</span>
-        <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}><strong style={{color:"#a78bfa"}}>Skoliose & Hohlkreuz:</strong> Form vor Gewicht – neutrales Becken, Kernspannung halten.</div>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:customTemplateKeys.length>0?10:18}}>
-        {[
-          {label:"Glute Day",ic:"🍑",border:"#ff6b9d33",action:()=>openTemplate("Glute Day")},
-          {label:"Back Day",ic:"💪",border:"#ff6b9d33",action:()=>openTemplate("Back Day")},
-          {label:"+ Neues",ic:"➕",border:"#34d39933",action:()=>{setExercises([]);setCustomName("");setNote("");setModal("custom");}},
-          {label:"Stepper",ic:"🚶‍♀️",border:"#f59e0b33",action:()=>{setStepperMin(10);setModal("stepper");}},
-        ].map(({label,ic,border,action})=>(<button key={label} onClick={action} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:`1px solid ${border}`,borderRadius:15,padding:"15px 8px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
-          <div style={{fontSize:24,marginBottom:3}}>{ic}</div>
-          <div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700}}>{label}</div>
-        </button>))}
-      </div>
-      {/* Eigene gespeicherte Trainings */}
-      {customTemplateKeys.length>0&&(<div style={{marginBottom:18}}>
-        <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44",marginBottom:8,letterSpacing:"0.04em"}}>MEINE TRAININGS</div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {customTemplateKeys.map(key=>(<div key={key} style={{display:"flex",alignItems:"center",gap:8}}>
-            <button onClick={()=>openTemplate(key)} style={{flex:1,background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:"1px solid #a78bfa33",borderRadius:12,padding:"12px 14px",color:"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:20}}>🏋️</span>
-              <div>
-                <div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700,color:"#fff"}}>{key}</div>
-                <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>{(userTemplates[key]||[]).length} Übungen</div>
-              </div>
-            </button>
-            <button onClick={()=>setConfirmDelete({type:"template",name:key})} style={{background:"#ff6b9d15",border:"1px solid #ff6b9d33",borderRadius:10,width:38,height:38,color:"#ff6b9d",fontSize:16,cursor:"pointer",flexShrink:0}}>🗑</button>
-          </div>))}
-        </div>
-      </div>)}
+  return(<div style={{paddingBottom:24}}>
+    <DateNav date={date} setDate={setDate}/>
+    <StepsCard steps={steps} setSteps={setSteps}/>
+    {profile?.hasScoliosis&&(<div style={{background:"#a78bfa18",border:"1px solid #a78bfa44",borderRadius:13,padding:"11px 14px",marginBottom:18,display:"flex",gap:9,alignItems:"center"}}>
+      <span style={{fontSize:16}}>&#127973;</span>
+      <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff77"}}><strong style={{color:"#a78bfa"}}>Skoliose & Hohlkreuz:</strong> Form vor Gewicht – neutrales Becken, Kernspannung halten.</div>
+    </div>)}
 
-      {/* Rückfrage Löschen */}
-      {confirmDelete&&(<div style={{position:"fixed",inset:0,background:"#000c",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
-        <div style={{background:"#1a1a2e",borderRadius:20,padding:24,width:"100%",maxWidth:400,border:"1px solid #ff6b9d44"}}>
-          <div style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff",marginBottom:10,textAlign:"center"}}>Training löschen?</div>
-          <div style={{fontFamily:"DM Sans",fontSize:14,color:"#ffffff88",textAlign:"center",marginBottom:20}}>
-            Willst du <strong style={{color:"#ff6b9d"}}>"{confirmDelete.name}"</strong> wirklich dauerhaft löschen? Das kann nicht rückgängig gemacht werden.
-          </div>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={()=>setConfirmDelete(null)} style={{flex:1,background:"#ffffff15",border:"none",borderRadius:12,padding:14,color:"#fff",fontFamily:"DM Sans",fontWeight:600,fontSize:14,cursor:"pointer"}}>Abbrechen</button>
-            <button onClick={()=>deleteTemplate(confirmDelete.name)} style={{flex:1,background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:12,padding:14,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 14px #ff6b9d44"}}>Ja, löschen</button>
-          </div>
-        </div>
-      </div>)}
-
-      {modal==="stepper"&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-        <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:18}}>
-            <span style={{fontFamily:"Playfair Display",fontSize:19,fontWeight:700,color:"#fff"}}>🚶‍♀️ Stepper</span>
-            <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
-            <button onClick={()=>setStepperMin(m=>Math.max(1,m-5))} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>&#8722;</button>
-            <div style={{flex:1,textAlign:"center"}}>
-              <input type="number" min="1" value={stepperMin} onChange={e=>setStepperMin(Math.max(1,Number(e.target.value)))} style={{background:"transparent",border:"none",textAlign:"center",fontSize:42,fontWeight:700,color:"#f59e0b",fontFamily:"Playfair Display",outline:"none",width:"120px"}}/>
-              <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff44"}}>Minuten · ca. {Math.round(stepperMin*STEPPER_KCAL_PER_MIN)} kcal</div>
-            </div>
-            <button onClick={()=>setStepperMin(m=>m+5)} style={{background:"#ffffff15",border:"none",borderRadius:10,width:48,height:48,color:"#fff",fontSize:24,cursor:"pointer"}}>&#43;</button>
-          </div>
-          <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
-            {[5,10,15,20,30,45,60].map(m=>(<button key={m} onClick={()=>setStepperMin(m)} style={{background:stepperMin===m?"#f59e0b":"#ffffff0f",border:"none",borderRadius:99,padding:"6px 14px",color:stepperMin===m?"#000":"#ffffff66",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",fontWeight:stepperMin===m?700:400}}>{m} min</button>))}
-          </div>
-          <button onClick={saveStepper} style={{width:"100%",background:"linear-gradient(135deg,#f59e0b,#d97706)",border:"none",borderRadius:13,padding:15,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer"}}>Speichern ✨</button>
-        </div>
-      </div>)}
-
-      {(modal==="Glute Day"||modal==="Back Day"||modal==="custom"||customTemplateKeys.includes(modal))&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-        <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>{modal==="custom"?"✨ Eigenes Training":modal}</span>
-            <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
-          </div>
-          {modal==="custom"&&<input value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="Trainingsname…" style={fs({marginBottom:12})}/>}
-          <div style={{background:"#a78bfa15",borderRadius:9,padding:"8px 12px",marginBottom:13,fontFamily:"DM Sans",fontSize:11,color:"#c4b5fd"}}>⚡ Gewicht anpassen falls du heute mehr oder weniger schaffst!</div>
-          {exercises.map(ex=><ExerciseRow key={ex.id} ex={ex} onToggle={()=>toggleEx(ex.id)} onRemove={()=>removeEx(ex.id)} onChange={updateEx}/>)}
-          {showAddEx?(
-            <div style={{background:"#0f0f23",borderRadius:11,padding:13,marginBottom:11,border:"1px solid #34d39933"}}>
-              <div style={{fontFamily:"DM Sans",fontSize:12,fontWeight:600,color:"#34d399",marginBottom:9}}>Neue Übung</div>
-              <input value={newEx.name} onChange={e=>setNewEx(p=>({...p,name:e.target.value}))} placeholder="Übungsname" style={fs({marginBottom:8})}/>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:9}}>
-                <input type="number" step="0.5" value={newEx.weightStr} onChange={e=>setNewEx(p=>({...p,weightStr:e.target.value}))} placeholder="kg" style={fs({padding:"8px 10px",fontSize:12})}/>
-                <input type="number" value={newEx.sets} onChange={e=>setNewEx(p=>({...p,sets:e.target.value}))} placeholder="Sätze" style={fs({padding:"8px 10px",fontSize:12})}/>
-                <input value={newEx.reps} onChange={e=>setNewEx(p=>({...p,reps:e.target.value}))} placeholder="Wdh." style={fs({padding:"8px 10px",fontSize:12})}/>
-              </div>
-              <div style={{display:"flex",gap:8}}>
-                <button onClick={addExercise} style={{flex:1,background:"#34d399",border:"none",borderRadius:9,padding:10,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:12,cursor:"pointer"}}>Hinzufügen</button>
-                <button onClick={()=>setShowAddEx(false)} style={{background:"#ffffff15",border:"none",borderRadius:9,padding:"10px 14px",color:"#fff",fontFamily:"DM Sans",fontSize:12,cursor:"pointer"}}>Abbrechen</button>
-              </div>
-            </div>
-          ):(
-            <button onClick={()=>setShowAddEx(true)} style={{width:"100%",background:"#34d39912",border:"1px dashed #34d39933",borderRadius:11,padding:11,color:"#34d399",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",marginBottom:11}}>+ Übung hinzufügen</button>
-          )}
-          <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Notizen…" rows={2} style={fs({resize:"none",marginBottom:14})}/>
-          <button onClick={saveSession} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:13,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 6px 20px #ff6b9d44"}}>Session speichern ✨</button>
-        </div>
-      </div>)}
-
-      {sessions.length===0?(
-        <div style={{textAlign:"center",color:"#ffffff22",fontFamily:"DM Sans",fontSize:14,padding:"28px 0"}}>Noch keine Sessions heute 🏋️</div>
-      ):(
-        <div style={{display:"flex",flexDirection:"column",gap:13}}>
-          {sessions.map(s=>(<div key={s.id} style={{background:"#16213e",borderRadius:15,padding:17,border:"1px solid #ffffff09",animation:"fadeIn 0.4s ease",position:"relative"}}>
-            <button onClick={()=>removeSession(s.id)} style={{position:"absolute",top:12,right:13,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer"}}>&#10005;</button>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:11}}>
-              <span style={{fontSize:18}}>{icon(s.type)}</span>
-              <span style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:"#fff"}}>{s.type}</span>
-              {s.stepperMin&&<span style={{fontFamily:"DM Sans",fontSize:12,color:"#f59e0b"}}>{s.stepperMin} min</span>}
-            </div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:11}}>
-              {s.exercises.map(e=>(<span key={e.id} onClick={()=>{
-                setAllSessions(prev=>({...prev,[date]:(prev[date]||[]).map(ss=>ss.id===s.id?{...ss,exercises:ss.exercises.map(ex=>ex.id===e.id?{...ex,done:!ex.done}:ex)}:ss)}));
-              }} style={{background:e.done?"#ff6b9d22":"#ffffff09",border:`1px solid ${e.done?"#ff6b9d44":"#ffffff09"}`,borderRadius:99,padding:"3px 9px",fontFamily:"DM Sans",fontSize:11,color:e.done?"#ff9ec8":"#ffffff44",cursor:"pointer"}}>
-                {e.done?"✓ ":""}{e.name}{e.weightStr?` · ${e.weightStr}kg`:""} {e.sets}×{e.reps}
-              </span>))}
-            </div>
-            {s.note&&<div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff55",marginBottom:10,fontStyle:"italic"}}>📝 {s.note}</div>}
-            <div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff33",marginBottom:8}}>Übungen antippen zum Abhaken ✓</div>
-            <div style={{background:"#a78bfa15",border:"1px solid #a78bfa33",borderRadius:9,padding:"9px 11px",fontFamily:"DM Sans",fontSize:12,color:"#c4b5fd"}}>{s.tip}</div>
-          </div>))}
-        </div>
-      )}
+    {/* Basis-Trainings */}
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
+      {[{label:"Glute Day",ic:"&#127821;",border:"#ff6b9d33",action:()=>openTrainingTemplate("Glute Day")},
+        {label:"Back Day",ic:"&#128170;",border:"#ff6b9d33",action:()=>openTrainingTemplate("Back Day")}
+      ].map(({label,ic,border,action})=>(<button key={label} onClick={action} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:`1px solid ${border}`,borderRadius:15,padding:"15px 8px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
+        <div style={{fontSize:24,marginBottom:3}} dangerouslySetInnerHTML={{__html:ic}}/>
+        <div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700}}>{label}</div>
+      </button>))}
     </div>
-  );
+    {/* Neu-Button */}
+    <button onClick={()=>setModal("kind")} style={{width:"100%",background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:"1px solid #34d39933",borderRadius:15,padding:"14px",color:"#34d399",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:10}}>
+      <span style={{fontSize:20}}>&#10133;</span>
+      <span style={{fontFamily:"Playfair Display",fontSize:14,fontWeight:700}}>Neue Einheit hinzufügen</span>
+    </button>
+
+    {/* Eigene gespeicherte Trainings */}
+    {customTemplateKeys.length>0&&(<div style={{marginBottom:18}}>
+      <div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff44",marginBottom:8,letterSpacing:"0.04em"}}>MEINE TRAININGS</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {customTemplateKeys.map(key=>(<div key={key} style={{display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={()=>openTrainingTemplate(key)} style={{flex:1,background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:"1px solid #a78bfa33",borderRadius:12,padding:"12px 14px",color:"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:20}}>&#127947;</span>
+            <div><div style={{fontFamily:"Playfair Display",fontSize:13,fontWeight:700}}>{key}</div><div style={{fontFamily:"DM Sans",fontSize:11,color:"#ffffff55"}}>{(userTemplates[key]||[]).length} Übungen</div></div>
+          </button>
+          <button onClick={()=>setConfirmDelete({name:key})} style={{background:"#ff6b9d15",border:"1px solid #ff6b9d33",borderRadius:10,width:38,height:38,color:"#ff6b9d",fontSize:16,cursor:"pointer",flexShrink:0}}>&#128465;</button>
+        </div>))}
+      </div>
+    </div>)}
+
+    {/* Rückfrage löschen */}
+    {confirmDelete&&(<div style={{position:"fixed",inset:0,background:"#000c",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 24px"}}>
+      <div style={{background:"#1a1a2e",borderRadius:20,padding:24,width:"100%",maxWidth:400,border:"1px solid #ff6b9d44"}}>
+        <div style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff",marginBottom:10,textAlign:"center"}}>Training löschen?</div>
+        <div style={{fontFamily:"DM Sans",fontSize:14,color:"#ffffff88",textAlign:"center",marginBottom:20}}>
+          Willst du <strong style={{color:"#ff6b9d"}}>"{confirmDelete.name}"</strong> wirklich dauerhaft löschen? Das kann nicht rückgängig gemacht werden.
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setConfirmDelete(null)} style={{flex:1,background:"#ffffff15",border:"none",borderRadius:12,padding:14,color:"#fff",fontFamily:"DM Sans",fontWeight:600,fontSize:14,cursor:"pointer"}}>Abbrechen</button>
+          <button onClick={()=>deleteTemplate(confirmDelete.name)} style={{flex:1,background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:12,padding:14,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer"}}>Ja, löschen</button>
+        </div>
+      </div>
+    </div>)}
+
+    {/* Art wählen */}
+    {modal==="kind"&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}>
+          <span style={{fontFamily:"Playfair Display",fontSize:19,fontWeight:700,color:"#fff"}}>Was möchtest du eintragen?</span>
+          <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {[
+            {kind:"training",label:"Training",sub:"Krafttraining, eigene Übungen",ic:"&#127947;",color:"#ff6b9d"},
+            {kind:"cardio",label:"Cardio",sub:"Laufen, Fahrrad, Stepper...",ic:"&#128035;",color:"#f59e0b"},
+            {kind:"sport",label:"Sportart",sub:"Tennis, Tanzen, Yoga...",ic:"&#127942;",color:"#34d399"},
+          ].map(({kind,label,sub,ic,color})=>(<button key={kind} onClick={()=>{setModal(kind);if(kind==="training"){setExercises([]);setCustomName("");setNote("");setActiveTemplate("custom");}setDurationMin(20);}} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:`1px solid ${color}44`,borderRadius:14,padding:"16px 18px",color:"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14}}>
+            <span style={{fontSize:28}} dangerouslySetInnerHTML={{__html:ic}}/>
+            <div><div style={{fontFamily:"Playfair Display",fontSize:16,fontWeight:700,color:color}}>{label}</div><div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff55",marginTop:2}}>{sub}</div></div>
+          </button>))}
+        </div>
+      </div>
+    </div>)}
+
+    {/* Cardio Liste */}
+    {modal==="cardio"&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"80vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:18}}>
+          <span style={{fontFamily:"Playfair Display",fontSize:19,fontWeight:700,color:"#fff"}}>&#128035; Cardio wählen</span>
+          <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+          {CARDIO_LIST.map(c=>(<button key={c.name} onClick={()=>{setSelectedCardio(c);setModal("duration-cardio");}} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:"1px solid #f59e0b33",borderRadius:12,padding:"14px 10px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:26,marginBottom:4}}>{c.icon}</div>
+            <div style={{fontFamily:"DM Sans",fontSize:13,fontWeight:600}}>{c.name}</div>
+            <div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff44"}}>~{c.kcalPerMin} kcal/min</div>
+          </button>))}
+        </div>
+      </div>
+    </div>)}
+
+    {/* Sport Liste */}
+    {modal==="sport"&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"80vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:18}}>
+          <span style={{fontFamily:"Playfair Display",fontSize:19,fontWeight:700,color:"#fff"}}>&#127942; Sportart wählen</span>
+          <button onClick={()=>setModal(null)} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+          {SPORT_LIST.map(s=>(<button key={s.name} onClick={()=>{setSelectedSport(s);setModal("duration-sport");}} style={{background:"linear-gradient(135deg,#16213e,#1a1a2e)",border:"1px solid #34d39933",borderRadius:12,padding:"14px 10px",color:"#fff",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:26,marginBottom:4}}>{s.icon}</div>
+            <div style={{fontFamily:"DM Sans",fontSize:13,fontWeight:600}}>{s.name}</div>
+            <div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff44"}}>~{s.kcalPerMin} kcal/min</div>
+          </button>))}
+        </div>
+      </div>
+    </div>)}
+
+    {/* Dauer Cardio */}
+    {modal==="duration-cardio"&&selectedCardio&&(<DurationModal title={selectedCardio.name} icon={selectedCardio.icon} color="#f59e0b" durationMin={durationMin} setDurationMin={setDurationMin} onSave={saveCardioSession} onClose={()=>setModal(null)}/>)}
+
+    {/* Dauer Sport */}
+    {modal==="duration-sport"&&selectedSport&&(<DurationModal title={selectedSport.name} icon={selectedSport.icon} color="#34d399" durationMin={durationMin} setDurationMin={setDurationMin} onSave={saveSportSession} onClose={()=>setModal(null)}/>)}
+
+    {/* Training Modal */}
+    {modal==="training"&&(<div style={{position:"fixed",inset:0,background:"#000b",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:"#1a1a2e",borderRadius:"24px 24px 0 0",padding:24,width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",border:"1px solid #ffffff12",paddingBottom:"max(24px,env(safe-area-inset-bottom))"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <span style={{fontFamily:"Playfair Display",fontSize:18,fontWeight:700,color:"#fff"}}>{activeTemplate==="custom"?"&#10024; Eigenes Training":activeTemplate}</span>
+          <button onClick={()=>{setModal(null);setActiveTemplate(null);}} style={{background:"none",border:"none",color:"#ffffff55",fontSize:24,cursor:"pointer"}}>&#10005;</button>
+        </div>
+        {activeTemplate==="custom"&&<input value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="Trainingsname…" style={fs({marginBottom:12})}/>}
+        {profile?.hasScoliosis&&<div style={{background:"#a78bfa15",borderRadius:9,padding:"8px 12px",marginBottom:13,fontFamily:"DM Sans",fontSize:11,color:"#c4b5fd"}}>&#9889; Gewicht anpassen – Form vor Gewicht! Neutrales Becken halten.</div>}
+        {exercises.map(ex=><ExerciseRow key={ex.id} ex={ex} onToggle={()=>toggleEx(ex.id)} onRemove={()=>removeEx(ex.id)} onChange={updateEx}/>)}
+        {showAddEx?(<div style={{background:"#0f0f23",borderRadius:11,padding:13,marginBottom:11,border:"1px solid #34d39933"}}>
+          <div style={{fontFamily:"DM Sans",fontSize:12,fontWeight:600,color:"#34d399",marginBottom:9}}>Neue Übung</div>
+          <input value={newEx.name} onChange={e=>setNewEx(p=>({...p,name:e.target.value}))} placeholder="Übungsname" style={fs({marginBottom:8})}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7,marginBottom:9}}>
+            <input type="number" step="0.5" value={newEx.weightStr} onChange={e=>setNewEx(p=>({...p,weightStr:e.target.value}))} placeholder="kg" style={fs({padding:"8px 10px",fontSize:12})}/>
+            <input type="number" value={newEx.sets} onChange={e=>setNewEx(p=>({...p,sets:e.target.value}))} placeholder="Sätze" style={fs({padding:"8px 10px",fontSize:12})}/>
+            <input value={newEx.reps} onChange={e=>setNewEx(p=>({...p,reps:e.target.value}))} placeholder="Wdh." style={fs({padding:"8px 10px",fontSize:12})}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={addExercise} style={{flex:1,background:"#34d399",border:"none",borderRadius:9,padding:10,color:"#000",fontFamily:"DM Sans",fontWeight:700,fontSize:12,cursor:"pointer"}}>Hinzufügen</button>
+            <button onClick={()=>setShowAddEx(false)} style={{background:"#ffffff15",border:"none",borderRadius:9,padding:"10px 14px",color:"#fff",fontFamily:"DM Sans",fontSize:12,cursor:"pointer"}}>Abbrechen</button>
+          </div>
+        </div>):(<button onClick={()=>setShowAddEx(true)} style={{width:"100%",background:"#34d39912",border:"1px dashed #34d39933",borderRadius:11,padding:11,color:"#34d399",fontFamily:"DM Sans",fontSize:12,cursor:"pointer",marginBottom:11}}>+ Übung hinzufügen</button>)}
+        <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Notizen…" rows={2} style={fs({resize:"none",marginBottom:14})}/>
+        <button onClick={saveTrainingSession} style={{width:"100%",background:"linear-gradient(135deg,#ff6b9d,#e05588)",border:"none",borderRadius:13,padding:15,color:"#fff",fontFamily:"DM Sans",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 6px 20px #ff6b9d44"}}>Session speichern &#10024;</button>
+      </div>
+    </div>)}
+
+    {/* Session History */}
+    {sessions.length===0?(<div style={{textAlign:"center",color:"#ffffff22",fontFamily:"DM Sans",fontSize:14,padding:"28px 0"}}>Noch keine Einheiten heute &#127947;</div>):(
+      <div style={{display:"flex",flexDirection:"column",gap:13}}>
+        {sessions.map(s=>(<div key={s.id} style={{background:"#16213e",borderRadius:15,padding:17,border:"1px solid #ffffff09",position:"relative"}}>
+          <button onClick={()=>removeSession(s.id)} style={{position:"absolute",top:12,right:13,background:"none",border:"none",color:"#ffffff22",fontSize:18,cursor:"pointer"}}>&#10005;</button>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:11}}>
+            <span style={{fontSize:18}} dangerouslySetInnerHTML={{__html:sessionIcon(s)}}/>
+            <span style={{fontFamily:"Playfair Display",fontSize:15,fontWeight:700,color:"#fff"}}>{s.type}</span>
+            {s.durationMin&&<span style={{fontFamily:"DM Sans",fontSize:12,color:"#f59e0b"}}>{s.durationMin} min</span>}
+          </div>
+          {s.exercises&&(<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:11}}>
+            {s.exercises.map(e=>(<span key={e.id} onClick={()=>{setAllSessions(prev=>({...prev,[date]:(prev[date]||[]).map(ss=>ss.id===s.id?{...ss,exercises:ss.exercises.map(ex=>ex.id===e.id?{...ex,done:!ex.done}:ex)}:ss)}));}} style={{background:e.done?"#ff6b9d22":"#ffffff09",border:`1px solid ${e.done?"#ff6b9d44":"#ffffff09"}`,borderRadius:99,padding:"3px 9px",fontFamily:"DM Sans",fontSize:11,color:e.done?"#ff9ec8":"#ffffff44",cursor:"pointer"}}>
+              {e.done?"&#10003; ":""}{e.name}{e.weightStr?` · ${e.weightStr}kg`:""} {e.sets}&#215;{e.reps}
+            </span>))}
+          </div>)}
+          {s.note&&<div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff55",marginBottom:10,fontStyle:"italic"}}>&#128221; {s.note}</div>}
+          <div style={{fontFamily:"DM Sans",fontSize:10,color:"#ffffff22",marginBottom:6}}>Übungen antippen zum Abhaken</div>
+          <div style={{background:"#a78bfa15",border:"1px solid #a78bfa33",borderRadius:9,padding:"9px 11px",fontFamily:"DM Sans",fontSize:12,color:"#c4b5fd"}}>{s.tip}</div>
+        </div>))}
+      </div>
+    )}
+  </div>);
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
-function App() {
+function App(){
   const [tab,setTab]=useState("nutrition");
   const [currentDate,setCurrentDate]=useState(todayDE());
   const [showProfile,setShowProfile]=useState(false);
@@ -731,80 +755,64 @@ function App() {
   const [allMeals,setAllMeals]=useLS("fitness_meals_v2",{});
   const [allSessions,setAllSessions]=useLS("fitness_sessions_v2",{});
   const [allSteps,setAllSteps]=useLS("fitness_steps_v1",{});
-  const [userTemplates,setUserTemplates]=useLS("fitness_templates_v1",{});
+  const [allTemplates,setAllTemplates]=useLS("fitness_templates_v2",{});
 
   const activeProfile=profiles.find(p=>p.id===activeProfileId)||profiles[0]||DEFAULT_PROFILE;
   const baseGoals=calcGoals(activeProfile);
   const profileMeals=allMeals[activeProfileId]||{};
   const profileSessions=allSessions[activeProfileId]||{};
   const profileSteps=allSteps[activeProfileId]||{};
-  const profileTemplates=userTemplates[activeProfileId]||{};
+  const profileTemplates=allTemplates[activeProfileId]||{};
 
   function setProfileMeals(fn){setAllMeals(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
   function setProfileSessions(fn){setAllSessions(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
   function setProfileSteps(fn){setAllSteps(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
-  function setProfileTemplates(fn){setUserTemplates(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
+  function setProfileTemplates(fn){setAllTemplates(prev=>({...prev,[activeProfileId]:typeof fn==="function"?fn(prev[activeProfileId]||{}):fn}));}
 
   function saveProfile(p){setProfiles(prev=>prev.find(x=>x.id===p.id)?prev.map(x=>x.id===p.id?p:x):[...prev,p]);setActiveProfileId(p.id);}
   function deleteProfile(id){setProfiles(prev=>prev.filter(p=>p.id!==id));if(activeProfileId===id)setActiveProfileId(profiles.find(p=>p.id!==id)?.id||"toni");}
 
   const todayMeals=profileMeals[todayDE()]||[];
   const todayKcal=r1(todayMeals.reduce((a,m)=>a+m.kcal,0));
-  const setDate=useCallback(fn=>{
-    setCurrentDate(prev=>{
-      const next = typeof fn==="function"?fn(prev):fn;
-      return next;
-    });
-  },[]);
+  const setDate=useCallback(fn=>setCurrentDate(prev=>typeof fn==="function"?fn(prev):fn),[]);
 
-  // Datum täglich aktualisieren
   useEffect(()=>{
-    const check=setInterval(()=>{
-      const de=todayDE();
-      setCurrentDate(prev=>prev===todayDE()?prev:de);
-    },60000);
+    const check=setInterval(()=>{const de=todayDE();setCurrentDate(prev=>prev===de?prev:de);},60000);
     return()=>clearInterval(check);
   },[]);
 
-  return (
-    <div style={{minHeight:"100vh",background:"#0f0f23",fontFamily:"DM Sans,sans-serif",maxWidth:480,margin:"0 auto",paddingBottom:"max(80px,calc(80px + env(safe-area-inset-bottom)))"}}>
-      <div style={{background:"linear-gradient(180deg,#16213e,#0f0f23)",padding:"max(22px,calc(14px + env(safe-area-inset-top))) 18px 14px",borderBottom:"1px solid #ffffff08"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div>
-            <div style={{fontFamily:"Playfair Display",fontSize:24,fontWeight:700,color:"#fff",lineHeight:1.1}}>Hey, {activeProfile.name}! ✨</div>
-            <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff44",marginTop:3}}>
-              {new Date().toLocaleDateString("de-DE",{timeZone:"Europe/Berlin",weekday:"long",day:"numeric",month:"long"})}
-            </div>
+  return(<div style={{minHeight:"100vh",background:"#0f0f23",fontFamily:"DM Sans,sans-serif",maxWidth:480,margin:"0 auto",paddingBottom:"max(80px,calc(80px + env(safe-area-inset-bottom)))"}}>
+    <div style={{background:"linear-gradient(180deg,#16213e,#0f0f23)",padding:"max(22px,calc(14px + env(safe-area-inset-top))) 18px 14px",borderBottom:"1px solid #ffffff08"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontFamily:"Playfair Display",fontSize:24,fontWeight:700,color:"#fff",lineHeight:1.1}}>Hey, {activeProfile.name}! &#10024;</div>
+          <div style={{fontFamily:"DM Sans",fontSize:12,color:"#ffffff44",marginTop:3}}>{new Date().toLocaleDateString("de-DE",{timeZone:"Europe/Berlin",weekday:"long",day:"numeric",month:"long"})}</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:12,padding:"7px 13px",textAlign:"center"}}>
+            <div style={{fontFamily:"Playfair Display",fontSize:17,fontWeight:700,color:"#ff6b9d"}}>{todayKcal}</div>
+            <div style={{fontFamily:"DM Sans",fontSize:9,color:"#ffffff44"}}>kcal heute</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{background:"#ff6b9d22",border:"1px solid #ff6b9d44",borderRadius:12,padding:"7px 13px",textAlign:"center"}}>
-              <div style={{fontFamily:"Playfair Display",fontSize:17,fontWeight:700,color:"#ff6b9d"}}>{todayKcal}</div>
-              <div style={{fontFamily:"DM Sans",fontSize:9,color:"#ffffff44"}}>kcal heute</div>
-            </div>
-            <button onClick={()=>setShowProfile(true)} style={{width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#ff6b9d,#a78bfa)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#fff",fontFamily:"DM Sans",flexShrink:0}}>
-              {activeProfile.gender==="male"?"♂":"♀"}
-            </button>
-          </div>
+          <button onClick={()=>setShowProfile(true)} style={{width:40,height:40,borderRadius:"50%",background:"linear-gradient(135deg,#ff6b9d,#a78bfa)",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,color:"#fff",flexShrink:0}}>
+            <span dangerouslySetInnerHTML={{__html:activeProfile.gender==="male"?"&#9794;":"&#9792;"}}/>
+          </button>
         </div>
       </div>
-
-      <div style={{padding:"16px 14px 0"}}>
-        {tab==="nutrition"
-          ?<NutritionTab allMeals={profileMeals} setAllMeals={setProfileMeals} allSessions={profileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate} baseGoals={baseGoals}/>
-          :<TrainingTab allSessions={profileSessions} setAllSessions={setProfileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} userTemplates={profileTemplates} setUserTemplates={setProfileTemplates} date={currentDate} setDate={setDate}/>}
-      </div>
-
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(20,28,56,0.97)",backdropFilter:"blur(20px)",borderTop:"1px solid #ffffff0e",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom)"}}>
-        {[{id:"nutrition",label:"Ernährung",icon:"🥗"},{id:"training",label:"Training",icon:"🏋️"}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",padding:"13px 0 15px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-          <span style={{fontSize:21,filter:tab===t.id?"none":"grayscale(1) opacity(0.35)"}}>{t.icon}</span>
-          <span style={{fontFamily:"DM Sans",fontSize:10,fontWeight:600,color:tab===t.id?"#ff6b9d":"#ffffff33",letterSpacing:"0.04em"}}>{t.label}</span>
-          {tab===t.id&&<div style={{width:22,height:2,background:"#ff6b9d",borderRadius:99,boxShadow:"0 0 7px #ff6b9d"}}/>}
-        </button>))}
-      </div>
-
-      {showProfile&&<ProfileModal profiles={profiles} activeId={activeProfileId} onSwitch={setActiveProfileId} onSave={saveProfile} onDelete={deleteProfile} onClose={()=>setShowProfile(false)}/>}
     </div>
-  );
+    <div style={{padding:"16px 14px 0"}}>
+      {tab==="nutrition"
+        ?<NutritionTab allMeals={profileMeals} setAllMeals={setProfileMeals} allSessions={profileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} date={currentDate} setDate={setDate} baseGoals={baseGoals} profile={activeProfile}/>
+        :<TrainingTab allSessions={profileSessions} setAllSessions={setProfileSessions} allSteps={profileSteps} setAllSteps={setProfileSteps} userTemplates={profileTemplates} setUserTemplates={setProfileTemplates} profile={activeProfile} allProfileSessions={profileSessions} date={currentDate} setDate={setDate}/>}
+    </div>
+    <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(20,28,56,0.97)",backdropFilter:"blur(20px)",borderTop:"1px solid #ffffff0e",display:"flex",zIndex:50,paddingBottom:"env(safe-area-inset-bottom)"}}>
+      {[{id:"nutrition",label:"Ernährung",icon:"&#127973;"},{id:"training",label:"Training",icon:"&#127947;"}].map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",padding:"13px 0 15px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+        <span style={{fontSize:21,filter:tab===t.id?"none":"grayscale(1) opacity(0.35)"}} dangerouslySetInnerHTML={{__html:t.icon}}/>
+        <span style={{fontFamily:"DM Sans",fontSize:10,fontWeight:600,color:tab===t.id?"#ff6b9d":"#ffffff33"}}>{t.label}</span>
+        {tab===t.id&&<div style={{width:22,height:2,background:"#ff6b9d",borderRadius:99,boxShadow:"0 0 7px #ff6b9d"}}/>}
+      </button>))}
+    </div>
+    {showProfile&&<ProfileModal profiles={profiles} activeId={activeProfileId} onSwitch={id=>{setActiveProfileId(id);setShowProfile(false);}} onSave={saveProfile} onDelete={deleteProfile} onClose={()=>setShowProfile(false)}/>}
+  </div>);
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
