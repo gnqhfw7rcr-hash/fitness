@@ -50,7 +50,7 @@ function fmtDate(dateStr) {
 function calcGoals(profile) {
   const { weight, height, age, activity } = profile;
   if (!weight || !height || !age) return { kcal: 1700, protein: Math.round((weight||59)*1.8), carbs: 170, fat: 55 };
-  const bmr = (p.gender === "male") ? 10*weight + 6.25*height - 5*age + 5 : 10*weight + 6.25*height - 5*age - 161;
+  const bmr = (profile.gender === "male") ? 10*weight + 6.25*height - 5*age + 5 : 10*weight + 6.25*height - 5*age - 161;
   const factors = { low:1.375, medium:1.55, high:1.725 };
   const tdee = Math.round(bmr*(factors[activity]||1.55));
   const kcal = tdee - 200;
